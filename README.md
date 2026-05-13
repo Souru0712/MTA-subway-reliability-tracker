@@ -355,17 +355,65 @@ cp .env.example .env
 
 ```bash
 docker compose up -d redpanda redpanda-console gtfs-producer
+```
 
-# Create Kafka topics
+---
+
+### VM — Step 10: Create topics and set retention
+
+```bash
+# Create topics
 docker exec -it redpanda rpk topic create \
   mta.trip_updates mta.vehicle_positions mta.alerts
 
-# Verify producer is running
-docker logs -f gtfs-producer
-# Expect: "feed=gtfs trip_updates=142 vehicle_positions=89" every 30s
+# Set retention per topic — 3.3GB and 7 days each (10GB total across 3 topics)
+docker exec -it redpanda rpk topic alter-config mta.trip_updates \
+  --set retention.bytes=3579139413 \
+  --set retention.ms=604800000
+
+docker exec -it redpanda rpk topic alter-config mta.vehicle_positions \
+  --set retention.bytes=3579139413 \
+  --set retention.ms=604800000
+
+docker exec -it redpanda rpk topic alter-config mta.alerts \
+  --set retention.bytes=3579139413 \
+  --set retention.ms=604800000
+
+# Verify retention applied
+docker exec -it redpanda rpk topic describe mta.trip_updates
+# Expect: retention.bytes=3579139413, retention.ms=604800000
 ```
 
-The VM is now collecting data continuously. Redpanda retains up to 10GB (~7 days) before rolling old messages. Leave it running.
+Retention is set at the topic level via `rpk` — not as a Redpanda server flag.
+
+---
+
+### VM — Step 11: Verify producer is running
+
+```bash
+docker logs -f gtfs-producer
+# Expect: "feed=gtfs trip_updates=142 vehicle_positions=89" every 30s
+# Ctrl+C to stop following logs — producer keeps running in background
+```
+
+The VM is now collecting data continuously. Messages accumulate for up to 7 days before the oldest are rolled off. Leave it running.
+
+**Health check — verify everything is working:**
+
+```bash
+# All 3 containers should show "Up"
+docker compose ps
+
+# Redpanda cluster is healthy
+docker exec -it redpanda rpk cluster info
+
+# Topics exist and have messages
+docker exec -it redpanda rpk topic list
+docker exec -it redpanda rpk topic describe mta.trip_updates
+
+# Producer is polling feeds
+docker logs --tail 20 gtfs-producer
+```
 
 Monitor topics remotely at `http://<oracle-vm-public-ip>:8082` (port 8082 must be open in your Oracle VCN Security List).
 

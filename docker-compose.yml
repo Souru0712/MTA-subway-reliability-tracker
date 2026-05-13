@@ -37,10 +37,8 @@ services:
       - --mode dev-container
       - --smp 1
       - --default-log-level=warn
-      - --memory 400m
+      - --memory 536870912
       - --reserve-memory 0
-      - --set redpanda.retention_bytes=10737418240
-      - --set redpanda.retention_ms=604800000
     ports:
       - "19092:19092"   # external Kafka API
       - "9644:9644"     # Redpanda admin API
