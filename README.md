@@ -146,7 +146,7 @@ Running every container on a single laptop is hardware-intensive and requires th
 
 ### Recommended: Oracle Cloud Free Tier VM + Laptop split
 
-Oracle Cloud's Always Free tier provides a permanent ARM VM at no cost — enough to run the broker and producer indefinitely.
+Oracle Cloud's Always Free tier includes a permanent x86 micro VM at no cost — enough to run the broker and producer indefinitely.
 
 ```
 Oracle VM (free, always on)      Laptop (run weekly or on demand)
@@ -168,32 +168,145 @@ redpanda-console                 fastapi + grafana
 
 #### Oracle VM resource allocation
 
-Oracle's Ampere A1 free allowance is **4 vCPU + 24GB RAM total** across all free instances. For this workload allocate:
+Use the **VM.Standard.E2.1.Micro** shape — always available in the free tier, no capacity issues.
 
-| Resource | Recommended | Reason |
+| Resource | Spec | Notes |
 |---|---|---|
-| vCPU | 1 | Redpanda single-threaded (`--smp 1`), producer is I/O-bound not CPU-bound |
-| RAM | 2GB | Redpanda needs ~300–500MB, producer ~150MB, OS overhead ~300MB — 2GB gives comfortable headroom |
-| Storage | 50GB boot volume | Default is sufficient; Redpanda data is capped at 10GB by retention config |
+| Shape | `VM.Standard.E2.1.Micro` | 1/8 OCPU, 1GB RAM — always free, always available |
+| Image | Ubuntu 22.04 Minimal | Saves ~100MB vs full Ubuntu, same Docker setup |
+| Boot volume | 50GB | Default; Redpanda data capped at 10GB by retention config |
 
-This leaves 3 vCPU + 22GB RAM free in your Oracle account for other projects.
+**Memory layout on 1GB RAM:**
+
+```
+Ubuntu minimal OS:   ~200MB
+Docker daemon:       ~100MB
+gtfs-producer:       ~150MB
+Redpanda (capped):   ~400MB
+─────────────────────────────
+Total:               ~850MB  (174MB headroom)
+```
+
+Redpanda is configured with `--memory 400m --reserve-memory 0` in `docker-compose.yml` to stay within budget. At this project's ingestion rate (~6 msg/sec) the cap has no practical impact on throughput.
 
 #### Oracle VM setup
 
-1. Log into [Oracle Cloud Console](https://cloud.oracle.com) → **Compute → Instances → Create Instance**
-2. Choose **Ampere A1** shape → allocate **1 OCPU, 2GB RAM**
-3. Select **Ubuntu 22.04** as the image
-4. Add your SSH public key
-5. After provisioning, open ports in **Networking → Virtual Cloud Networks → Security List**:
-   - Port `19092` — Redpanda external Kafka listener (for Spark on your laptop)
-   - Port `8082` — Redpanda Console UI (optional, for remote monitoring)
-6. SSH in and install Docker:
+**Step 1 — Generate an SSH key on your laptop**
+
+This key lets you connect to the VM from your laptop. Skip if you already have `~/.ssh/id_ed25519.pub`.
+
+```bash
+# Mac / Linux / Windows Git Bash
+ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
+# Press Enter to accept default path (~/.ssh/id_ed25519)
+# Set a passphrase or leave blank
+
+# Print the public key — you will paste this into Oracle
+cat ~/.ssh/id_ed25519.pub
+```
+
+---
+
+**Step 2 — Create the compute instance**
+
+1. Log into [Oracle Cloud Console](https://cloud.oracle.com)
+2. Top-left menu → **Compute → Instances → Create Instance**
+3. **Name:** `mta-tracker` (or any name)
+4. **Placement:** leave default availability domain
+5. **Image:** click **Change image** → select **Ubuntu** → choose **Ubuntu 22.04 Minimal** → click **Select image**
+6. **Shape:** click **Change shape** → select **Specialty and Previous Generation** → select **VM.Standard.E2.1.Micro** → click **Select shape**
+7. **Networking:** leave defaults (a VCN and subnet are created automatically)
+8. **Add SSH keys:** select **Paste public keys** → paste the output from `cat ~/.ssh/id_ed25519.pub`
+9. **Boot volume:** leave default (50GB)
+10. Click **Create** — provisioning takes ~2 minutes
+
+---
+
+**Step 3 — Find the public IP**
+
+Once the instance state shows **Running**:
+- Oracle Console → **Compute → Instances → mta-tracker**
+- Copy the **Public IP address** — you will use this everywhere `<oracle-vm-public-ip>` appears
+
+---
+
+**Step 4 — Open required ports (firewall)**
+
+By default Oracle blocks all inbound traffic except SSH (port 22). You must open two ports:
+
+1. Oracle Console → **Networking → Virtual Cloud Networks**
+2. Click your VCN (auto-named something like `vcn-YYYYMMDD-HHMM`)
+3. Click **Security Lists** → **Default Security List**
+4. Click **Add Ingress Rules** and add each rule below:
+
+| Rule | Source CIDR | Protocol | Port | Purpose |
+|---|---|---|---|---|
+| 1 | `0.0.0.0/0` | TCP | `19092` | Redpanda external Kafka (Spark on laptop) |
+| 2 | `0.0.0.0/0` | TCP | `8082` | Redpanda Console UI (optional) |
+
+Click **Add Ingress Rules** to save.
+
+---
+
+**Step 5 — SSH into the VM**
+
+```bash
+ssh ubuntu@<oracle-vm-public-ip>
+# First connection will ask to confirm the host fingerprint — type yes
+```
+
+---
+
+**Step 6 — Install Docker**
 
 ```bash
 sudo apt update && sudo apt install -y docker.io docker-compose-plugin
 sudo usermod -aG docker $USER
 newgrp docker
+
+# Verify
+docker --version
+docker compose version
 ```
+
+---
+
+**Step 7 — Generate an SSH key on the VM for GitHub**
+
+This key lets the VM clone and pull from your GitHub repo.
+
+```bash
+# On the VM
+ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
+# Press Enter to accept defaults
+
+cat ~/.ssh/id_ed25519.pub   # copy this output
+```
+
+Go to **GitHub → Settings → SSH and GPG keys → New SSH key**:
+- Title: `oracle-vm`
+- Key: paste the output above
+- Click **Add SSH key**
+
+Test the connection:
+
+```bash
+ssh -T git@github.com
+# Expect: Hi your-username! You've successfully authenticated...
+```
+
+---
+
+**Step 8 — Clone the repo and configure environment**
+
+```bash
+git clone git@github.com:your-username/MTA-subway-reliability-tracker.git
+cd MTA-subway-reliability-tracker
+cp .env.example .env
+nano .env   # fill in MTA_FEED_URLS (pre-filled), leave everything else blank
+```
+
+The VM only needs the MTA feed section — AWS, Snowflake, Airflow, and Postgres vars are only used on your laptop.
 
 ### Alternative: All local (optional)
 
@@ -217,7 +330,7 @@ The Oracle VM runs the broker and producer 24/7 at no cost. Your laptop connects
 
 ---
 
-### VM — Step 1: Install Docker on the Oracle VM
+### VM — Step 1: Install Docker on the Oracle VM (E2.1.Micro)
 
 ```bash
 ssh ubuntu@<oracle-vm-public-ip>
