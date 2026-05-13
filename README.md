@@ -366,22 +366,23 @@ docker compose up -d redpanda redpanda-console gtfs-producer
 docker exec -it redpanda rpk topic create \
   mta.trip_updates mta.vehicle_positions mta.alerts
 
-# Set retention per topic — 3.3GB and 7 days each (10GB total across 3 topics)
+# Set retention per topic — allocated by actual data volume (10GB total, 7 days each)
+# trip_updates produces ~95% of all data, so it gets the largest allocation
 docker exec -it redpanda rpk topic alter-config mta.trip_updates \
-  --set retention.bytes=3579139413 \
+  --set retention.bytes=8589934592 \
   --set retention.ms=604800000
 
 docker exec -it redpanda rpk topic alter-config mta.vehicle_positions \
-  --set retention.bytes=3579139413 \
+  --set retention.bytes=1610612736 \
   --set retention.ms=604800000
 
 docker exec -it redpanda rpk topic alter-config mta.alerts \
-  --set retention.bytes=3579139413 \
+  --set retention.bytes=536870912 \
   --set retention.ms=604800000
 
 # Verify retention applied
 docker exec -it redpanda rpk topic describe mta.trip_updates
-# Expect: retention.bytes=3579139413, retention.ms=604800000
+# Expect: retention.bytes=8589934592, retention.ms=604800000
 ```
 
 Retention is set at the topic level via `rpk` — not as a Redpanda server flag.
@@ -432,7 +433,7 @@ Then open `http://localhost:8082` → Topics tab. Close the terminal when done.
 
 ---
 
-### Laptop — Step 4: Set up Python environment
+### Laptop — Step 12: Set up Python environment
 
 ```bash
 python -m venv .venv
@@ -448,7 +449,7 @@ pip install -r requirements.txt
 
 ---
 
-### Laptop — Step 5: Configure environment
+### Laptop — Step 13: Configure environment
 
 ```bash
 cp .env.example .env
@@ -585,7 +586,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 ---
 
-### Laptop — Step 6: Load static schedule (one-time)
+### Laptop — Step 14: Load static schedule (one-time)
 
 Required before Spark can compute `on_time_pct`. Re-run weekly.
 
@@ -599,7 +600,7 @@ python -m src.ingestion.static_schedule
 
 ---
 
-### Laptop — Step 7: Run the Spark streaming job
+### Laptop — Step 15: Run the Spark streaming job
 
 Build the Spark image once (bakes in all JARs and Python packages):
 
@@ -639,7 +640,7 @@ docker exec -it postgres psql -U mta -d mta -c "SELECT COUNT(*) FROM reliability
 
 ---
 
-### Laptop — Step 8: Start the API and dashboard
+### Laptop — Step 16: Start the API and dashboard
 
 Open a new terminal tab — spark-submit stays attached in its own tab.
 
@@ -656,7 +657,7 @@ curl "http://localhost:8000/reliability?line=A&station=A27N&window=6h"
 
 ---
 
-### Laptop — Step 9: Airflow cold-path compaction (occasional)
+### Laptop — Step 17: Airflow cold-path compaction (occasional)
 
 Only needed to load S3 Parquet into Snowflake. Start it, run the DAG, then stop it.
 
