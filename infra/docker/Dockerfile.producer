@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir \
+    gtfs-realtime-bindings==2.0.0 \
+    confluent-kafka==2.3.0 \
+    requests==2.31.0 \
+    python-dotenv==1.0.1
+
+COPY src/ src/
+COPY config/ config/
+
+CMD ["python", "-m", "src.ingestion.gtfs_producer"]

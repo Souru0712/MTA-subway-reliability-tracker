@@ -1,0 +1,44 @@
+# Credentials / secrets
+.env
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service_account.json
+*_credentials.json
+*_secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Data files
+*.parquet
+*.zip
+*.log
+*.csv
+PLAN.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Grafana backup
+infra/grafana/provisioning/datasources/postgres.yml.bak
+
+# Airflow
+airflow/airflow.db
+logs/
+airflow-logs/
+
+# Spark checkpoints (written locally during dev)
+checkpoints/
+
+# Pytest
+.pytest_cache/
