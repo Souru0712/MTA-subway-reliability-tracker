@@ -415,7 +415,20 @@ docker exec -it redpanda rpk topic describe mta.trip_updates
 docker logs --tail 20 gtfs-producer
 ```
 
-Monitor topics remotely at `http://<oracle-vm-public-ip>:8082` (port 8082 must be open in your Oracle VCN Security List).
+**Redpanda Console — monitor topics remotely:**
+
+Try opening `http://<oracle-vm-public-ip>:8082` in your browser first. If it times out or fails to load, your ISP is likely blocking non-standard ports. Use SSH port forwarding instead — this tunnels port 8082 through the already-open SSH connection:
+
+```bash
+# Open a new terminal on your laptop — keep it running while browsing
+# If you used your own SSH key
+ssh -L 8082:localhost:8082 ubuntu@<oracle-vm-public-ip> -N
+
+# If you used Oracle's downloaded .key file
+ssh -i ~/Downloads/ssh-key-2026-05-13.key -L 8082:localhost:8082 ubuntu@<oracle-vm-public-ip> -N
+```
+
+Then open `http://localhost:8082` → Topics tab. Close the terminal when done.
 
 ---
 
