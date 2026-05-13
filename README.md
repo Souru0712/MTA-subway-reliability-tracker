@@ -222,11 +222,57 @@ cat ~/.ssh/id_ed25519.pub
 
 ---
 
-**Step 3 — Find the public IP**
+**Step 3 — SSH key options**
+
+Oracle gives you two options when creating the instance:
+
+**Option A — Oracle generates the key (downloaded as a `.key` file):**
+
+Oracle downloads a private key file to your machine. To use it:
+
+```bash
+# Mac / Linux / Windows Git Bash
+chmod 400 ~/Downloads/ssh-key-YYYY-MM-DD.key
+ssh -i ~/Downloads/ssh-key-YYYY-MM-DD.key ubuntu@<public-ip>
+```
+
+Store this file somewhere safe — you cannot download it again.
+
+**Option B — You paste your own public key (recommended):**
+
+Generate on your laptop and paste the public key during instance creation:
+
+```bash
+ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
+cat ~/.ssh/id_ed25519.pub   # paste this into Oracle's SSH key field
+```
+
+Connect without specifying a key file:
+
+```bash
+ssh ubuntu@<public-ip>
+```
+
+---
+
+**Step 4 — Find the public IP**
 
 Once the instance state shows **Running**:
 - Oracle Console → **Compute → Instances → mta-tracker**
-- Copy the **Public IP address** — you will use this everywhere `<oracle-vm-public-ip>` appears
+- Check **Public IP address** under Instance Information
+
+**If no public IP is shown**, Oracle did not assign one automatically. Fix it:
+
+1. Oracle Console → **Networking → IP Management → Reserved Public IPs**
+2. Click **Reserve Public IP Address** → name it `mta-tracker-ip` → click **Reserve**
+3. Go back to **Compute → Instances → mta-tracker**
+4. Scroll to **Attached VNICs** → click your primary VNIC
+5. Click **IPv4 Addresses** → three-dot menu next to your private IP → **Edit**
+6. Under **Public IP type** select **Reserved Public IP** → select `mta-tracker-ip`
+7. Click **Update**
+8. Go back to the instance page — the public IP now appears
+
+Copy the public IP — you will use it everywhere `<oracle-vm-public-ip>` appears in this guide.
 
 ---
 
