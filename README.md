@@ -189,170 +189,7 @@ Total:               ~850MB  (174MB headroom)
 
 Redpanda is configured with `--memory 400m --reserve-memory 0` in `docker-compose.yml` to stay within budget. At this project's ingestion rate (~6 msg/sec) the cap has no practical impact on throughput.
 
-#### Oracle VM setup
-
-**Step 1 — Generate an SSH key on your laptop**
-
-This key lets you connect to the VM from your laptop. Skip if you already have `~/.ssh/id_ed25519.pub`.
-
-```bash
-# Mac / Linux / Windows Git Bash
-ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
-# Press Enter to accept default path (~/.ssh/id_ed25519)
-# Set a passphrase or leave blank
-
-# Print the public key — you will paste this into Oracle
-cat ~/.ssh/id_ed25519.pub
-```
-
----
-
-**Step 2 — Create the compute instance**
-
-1. Log into [Oracle Cloud Console](https://cloud.oracle.com)
-2. Top-left menu → **Compute → Instances → Create Instance**
-3. **Name:** `mta-tracker` (or any name)
-4. **Placement:** leave default availability domain
-5. **Image:** click **Change image** → select **Ubuntu** → choose **Ubuntu 22.04 Minimal** → click **Select image**
-6. **Shape:** click **Change shape** → select **Specialty and Previous Generation** → select **VM.Standard.E2.1.Micro** → click **Select shape**
-7. **Networking:** leave defaults (a VCN and subnet are created automatically)
-8. **Add SSH keys:** select **Paste public keys** → paste the output from `cat ~/.ssh/id_ed25519.pub`
-9. **Boot volume:** leave default (50GB)
-10. Click **Create** — provisioning takes ~2 minutes
-
----
-
-**Step 3 — SSH key options**
-
-Oracle gives you two options when creating the instance:
-
-**Option A — Oracle generates the key (downloaded as a `.key` file):**
-
-Oracle downloads a private key file to your machine. To use it:
-
-```bash
-# Mac / Linux / Windows Git Bash
-chmod 400 ~/Downloads/ssh-key-YYYY-MM-DD.key
-ssh -i ~/Downloads/ssh-key-YYYY-MM-DD.key ubuntu@<public-ip>
-```
-
-Store this file somewhere safe — you cannot download it again.
-
-**Option B — You paste your own public key (recommended):**
-
-Generate on your laptop and paste the public key during instance creation:
-
-```bash
-ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
-cat ~/.ssh/id_ed25519.pub   # paste this into Oracle's SSH key field
-```
-
-Connect without specifying a key file:
-
-```bash
-ssh ubuntu@<public-ip>
-```
-
----
-
-**Step 4 — Find the public IP**
-
-Once the instance state shows **Running**:
-- Oracle Console → **Compute → Instances → mta-tracker**
-- Check **Public IP address** under Instance Information
-
-**If no public IP is shown**, Oracle did not assign one automatically. Fix it:
-
-1. Oracle Console → **Networking → IP Management → Reserved Public IPs**
-2. Click **Reserve Public IP Address** → name it `mta-tracker-ip` → click **Reserve**
-3. Go back to **Compute → Instances → mta-tracker**
-4. Scroll to **Attached VNICs** → click your primary VNIC
-5. Click **IPv4 Addresses** → three-dot menu next to your private IP → **Edit**
-6. Under **Public IP type** select **Reserved Public IP** → select `mta-tracker-ip`
-7. Click **Update**
-8. Go back to the instance page — the public IP now appears
-
-Copy the public IP — you will use it everywhere `<oracle-vm-public-ip>` appears in this guide.
-
----
-
-**Step 4 — Open required ports (firewall)**
-
-By default Oracle blocks all inbound traffic except SSH (port 22). You must open two ports:
-
-1. Oracle Console → **Networking → Virtual Cloud Networks**
-2. Click your VCN (auto-named something like `vcn-YYYYMMDD-HHMM`)
-3. Click **Security Lists** → **Default Security List**
-4. Click **Add Ingress Rules** and add each rule below:
-
-| Rule | Source CIDR | Protocol | Port | Purpose |
-|---|---|---|---|---|
-| 1 | `0.0.0.0/0` | TCP | `19092` | Redpanda external Kafka (Spark on laptop) |
-| 2 | `0.0.0.0/0` | TCP | `8082` | Redpanda Console UI (optional) |
-
-Click **Add Ingress Rules** to save.
-
----
-
-**Step 5 — SSH into the VM**
-
-```bash
-ssh ubuntu@<oracle-vm-public-ip>
-# First connection will ask to confirm the host fingerprint — type yes
-```
-
----
-
-**Step 6 — Install Docker**
-
-```bash
-sudo apt update && sudo apt install -y docker.io docker-compose-plugin
-sudo usermod -aG docker $USER
-newgrp docker
-
-# Verify
-docker --version
-docker compose version
-```
-
----
-
-**Step 7 — Generate an SSH key on the VM for GitHub**
-
-This key lets the VM clone and pull from your GitHub repo.
-
-```bash
-# On the VM
-ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
-# Press Enter to accept defaults
-
-cat ~/.ssh/id_ed25519.pub   # copy this output
-```
-
-Go to **GitHub → Settings → SSH and GPG keys → New SSH key**:
-- Title: `oracle-vm`
-- Key: paste the output above
-- Click **Add SSH key**
-
-Test the connection:
-
-```bash
-ssh -T git@github.com
-# Expect: Hi your-username! You've successfully authenticated...
-```
-
----
-
-**Step 8 — Clone the repo and configure environment**
-
-```bash
-git clone git@github.com:your-username/MTA-subway-reliability-tracker.git
-cd MTA-subway-reliability-tracker
-cp .env.example .env
-nano .env   # fill in MTA_FEED_URLS (pre-filled), leave everything else blank
-```
-
-The VM only needs the MTA feed section — AWS, Snowflake, Airflow, and Postgres vars are only used on your laptop.
+See **Approach 1** in the Quick Start below for the full step-by-step Oracle VM setup.
 
 ### Alternative: All local (optional)
 
@@ -376,38 +213,145 @@ The Oracle VM runs the broker and producer 24/7 at no cost. Your laptop connects
 
 ---
 
-### VM — Step 1: Install Docker on the Oracle VM (E2.1.Micro)
+### VM — Step 1: Generate an SSH key on your laptop
+
+This lets your laptop connect to the VM. Skip if you already have `~/.ssh/id_ed25519.pub`.
 
 ```bash
+# Mac / Linux / Windows Git Bash
+ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
+# Press Enter to accept all defaults
+
+# Print the public key — you will paste this into Oracle
+cat ~/.ssh/id_ed25519.pub
+```
+
+---
+
+### VM — Step 2: Create the Oracle compute instance
+
+1. Log into [Oracle Cloud Console](https://cloud.oracle.com)
+2. Top-left menu → **Compute → Instances → Create Instance**
+3. **Name:** `mta-tracker`
+4. **Image:** click **Change image** → **Ubuntu** → **Ubuntu 22.04 Minimal** → **Select image**
+5. **Shape:** click **Change shape** → **Specialty and Previous Generation** → **VM.Standard.E2.1.Micro** → **Select shape**
+6. **Networking:** leave defaults
+7. **Add SSH keys:** select **Paste public keys** → paste the output from `cat ~/.ssh/id_ed25519.pub`
+8. **Boot volume:** leave default (50GB)
+9. Click **Create** — provisioning takes ~2 minutes
+
+> **If Oracle generates the key instead:** it downloads a `.key` file. Use it to connect:
+> ```bash
+> chmod 400 ~/Downloads/ssh-key-2026-05-13.key
+> ssh -i ~/Downloads/ssh-key-2026-05-13.key ubuntu@<public-ip>
+> ```
+
+---
+
+### VM — Step 3: Find the public IP
+
+Once instance state shows **Running**:
+- Oracle Console → **Compute → Instances → mta-tracker** → copy **Public IP address**
+
+**If no public IP is shown:**
+1. **Networking → IP Management → Reserved Public IPs** → **Reserve Public IP Address** → name it `mta-tracker-ip` → **Reserve**
+2. **Compute → Instances → mta-tracker** → **Attached VNICs** → click your VNIC
+3. **IPv4 Addresses** → three-dot menu → **Edit** → set **Public IP type** to **Reserved** → select `mta-tracker-ip` → **Update**
+
+---
+
+### VM — Step 4: Open firewall ports
+
+1. **Networking → Virtual Cloud Networks** → click your VCN
+2. **Security Lists → Default Security List → Add Ingress Rules**
+
+| Source CIDR | Protocol | Port | Purpose |
+|---|---|---|---|
+| `0.0.0.0/0` | TCP | `19092` | Redpanda Kafka listener (Spark on laptop) |
+| `0.0.0.0/0` | TCP | `8082` | Redpanda Console UI (optional) |
+
+---
+
+### VM — Step 5: SSH into the VM
+
+```bash
+# If you pasted your own public key
 ssh ubuntu@<oracle-vm-public-ip>
-sudo apt update && sudo apt install -y docker.io docker-compose-plugin
+# Type yes to confirm host fingerprint on first connection
+
+# If Oracle generated the key (downloaded .key file)
+chmod 400 ~/Downloads/ssh-key-2026-05-13.key
+ssh -i ~/Downloads/ssh-key-2026-05-13.key ubuntu@<oracle-vm-public-ip>
+
+# Windows full path
+ssh -i "C:/Users/oscar/Downloads/ssh-key-2026-05-13.key" ubuntu@<oracle-vm-public-ip>
+```
+
+---
+
+### VM — Step 6: Install Docker
+
+```bash
+sudo apt remove docker docker.io containerd runc -y
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg
+
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 sudo usermod -aG docker $USER
 newgrp docker
+
+# Verify
+docker --version
+docker compose version
 ```
 
 ---
 
-### VM — Step 2: Clone the repo and configure environment
+### VM — Step 7: Add VM SSH key to GitHub
+
+This lets the VM clone your repo.
 
 ```bash
-git clone https://github.com/your-username/MTA-subway-reliability-tracker.git
-cd MTA-subway-reliability-tracker
-cp .env.example .env
+ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
+# Press Enter to accept all defaults
+cat ~/.ssh/id_ed25519.pub   # copy the full output
 ```
 
-The VM only needs the MTA and Kafka sections filled in — all others can be left blank on the VM.
+Go to **GitHub → Settings → SSH and GPG keys → New SSH key**:
+- Title: `oracle-vm`
+- Paste the output → **Add SSH key**
 
+Test:
+```bash
+ssh -T git@github.com
+# Expect: Hi your-username! You've successfully authenticated...
 ```
-# .env on the VM — only these sections are required
-MTA_FEED_URLS=https://api-endpoint.mta.info/...   ← pre-filled, leave as-is
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092             ← pre-filled, leave as-is
-```
-
-All other variables (AWS, Snowflake, Airflow, Postgres) are only needed on your laptop.
 
 ---
 
-### VM — Step 3: Start the broker and producer
+### VM — Step 8: Clone the repo
+
+```bash
+git clone git@github.com:your-username/MTA-subway-reliability-tracker.git
+cd MTA-subway-reliability-tracker
+cp .env.example .env
+# No edits needed — MTA_FEED_URLS and KAFKA_BOOTSTRAP_SERVERS are pre-filled correctly
+```
+
+---
+
+### VM — Step 9: Start the broker and producer
 
 ```bash
 docker compose up -d redpanda redpanda-console gtfs-producer
