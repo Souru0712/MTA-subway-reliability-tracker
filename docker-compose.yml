@@ -28,7 +28,7 @@ services:
       - redpanda
       - start
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://${REDPANDA_ADVERTISE_ADDR:-localhost}:19092
       - --pandaproxy-addr internal://0.0.0.0:8083,external://0.0.0.0:18083
       - --advertise-pandaproxy-addr internal://redpanda:8083,external://localhost:18083
       - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
@@ -97,7 +97,6 @@ services:
     env_file:
       - .env
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       POSTGRES_MTA_DSN: postgresql://mta:mta@postgres:5432/mta
 
   spark-worker:

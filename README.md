@@ -144,17 +144,17 @@ S3 Parquet  →  (Airflow, daily 3 AM)  →  Snowflake RAW.MTA_EVENTS
 
 Running every container on a single laptop is hardware-intensive and requires the machine to stay on 24/7 in order to capture all the data from the API. The recommended approach splits the workload across a free cloud VM and your laptop.
 
-### Recommended: Oracle Cloud Free Tier VM + Laptop split
+### Recommended: Hetzner VM + Laptop split
 
-Oracle Cloud's Always Free tier includes a permanent x86 micro VM at no cost — enough to run the broker and producer indefinitely.
+A Hetzner CPX11 runs the broker and producer 24/7 at ~$7/month. Your laptop connects to it when you are ready to process the accumulated data.
 
 ```
-Oracle VM (free, always on)      Laptop (run weekly or on demand)
-───────────────────────────      ──────────────────────────────────
-redpanda                         spark-master + spark-worker
-gtfs-producer                    postgres
-redpanda-console                 fastapi + grafana
-                                 airflow (occasional)
+Hetzner VM (~$7/month, always on)   Laptop (run weekly or on demand)
+─────────────────────────────────   ──────────────────────────────────
+redpanda                            spark-master + spark-worker
+gtfs-producer                       postgres
+redpanda-console                    fastapi + grafana
+                                    airflow (occasional)
 ```
 
 **How it works:**
@@ -164,32 +164,28 @@ redpanda-console                 fastapi + grafana
 - Spark reads the entire backlog at ~1000× the producer rate — a week of data clears in ~10 minutes
 - Results land in Postgres (hot) and S3 (cold) as normal
 
-**Cost:** $0. Oracle Always Free Tier — no credit card charges as long as you stay within the free allocation.
+**Cost:** ~$7/month for a Hetzner CPX11 (2 vCPU, 2GB RAM).
 
-#### Oracle VM resource allocation
-
-Use the **VM.Standard.E2.1.Micro** shape — always available in the free tier, no capacity issues.
+#### Hetzner VM resource allocation
 
 | Resource | Spec | Notes |
 |---|---|---|
-| Shape | `VM.Standard.E2.1.Micro` | 1/8 OCPU, 1GB RAM — always free, always available |
-| Image | Ubuntu 22.04 Minimal | Saves ~100MB vs full Ubuntu, same Docker setup |
-| Boot volume | 50GB | Default; Redpanda data capped at 10GB by retention config |
+| Plan | CPX11 | 2 vCPU, 2GB RAM, 40GB disk |
+| Image | Ubuntu 22.04 | Standard — no minimal variant needed |
+| Location | US-East (Ashburn) | Closest to MTA API servers in NYC |
 
-**Memory layout on 1GB RAM:**
+**Memory layout on 2GB RAM:**
 
 ```
-Ubuntu minimal OS:   ~200MB
+Ubuntu OS:           ~250MB
 Docker daemon:       ~100MB
 gtfs-producer:       ~150MB
-Redpanda (capped):   ~400MB
+Redpanda:            ~500MB
 ─────────────────────────────
-Total:               ~850MB  (174MB headroom)
+Total:               ~1000MB  (~1GB headroom)
 ```
 
-Redpanda is configured with `--memory 400m --reserve-memory 0` in `docker-compose.yml` to stay within budget. At this project's ingestion rate (~6 msg/sec) the cap has no practical impact on throughput.
-
-See **Approach 1** in the Quick Start below for the full step-by-step Oracle VM setup.
+See **Approach 1** in the Quick Start below for the full step-by-step Hetzner VM setup.
 
 ### Alternative: All local (optional)
 
@@ -207,89 +203,57 @@ Run everything on one machine. Requires 8GB+ RAM, machine must stay on 24/7. Ste
 
 ---
 
-## Approach 1 — Oracle VM + Laptop (recommended)
+## Approach 1 — Hetzner VM + Laptop (recommended)
 
-The Oracle VM runs the broker and producer 24/7 at no cost. Your laptop connects to it when you are ready to process the accumulated data.
+The Hetzner VM runs the broker and producer 24/7. Your laptop connects to it when you are ready to process the accumulated data.
 
 ---
 
 ### VM — Step 1: Generate an SSH key on your laptop
 
-This lets your laptop connect to the VM. Skip if you already have `~/.ssh/id_ed25519.pub`.
+Skip if you already have `~/.ssh/id_ed25519.pub`.
 
 ```bash
 # Mac / Linux / Windows Git Bash
-ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
+ssh-keygen -t ed25519 -C "your-email"
 # Press Enter to accept all defaults
 
-# Print the public key — you will paste this into Oracle
-cat ~/.ssh/id_ed25519.pub
+cat ~/.ssh/id_ed25519.pub   # copy this — paste it into Hetzner
 ```
 
 ---
 
-### VM — Step 2: Create the Oracle compute instance
+### VM — Step 2: Create the Hetzner server
 
-1. Log into [Oracle Cloud Console](https://cloud.oracle.com)
-2. Top-left menu → **Compute → Instances → Create Instance**
-3. **Name:** `mta-tracker`
-4. **Image:** click **Change image** → **Ubuntu** → **Ubuntu 22.04 Minimal** → **Select image**
-5. **Shape:** click **Change shape** → **Specialty and Previous Generation** → **VM.Standard.E2.1.Micro** → **Select shape**
-6. **Networking:** leave defaults
-7. **Add SSH keys:** select **Paste public keys** → paste the output from `cat ~/.ssh/id_ed25519.pub`
-8. **Boot volume:** leave default (50GB)
-9. Click **Create** — provisioning takes ~2 minutes
+1. Go to [hetzner.com/cloud](https://www.hetzner.com/cloud) → **Sign up** → create a new project
+2. Click **Add Server** and configure:
+   - **Location:** US-East (Ashburn)
+   - **Image:** Ubuntu 22.04
+   - **Type:** Shared vCPU → **CPX11** (2 vCPU, 2GB RAM)
+   - **Networking:** leave defaults (public IPv4 enabled)
+   - **Firewall:** skip — Hetzner has no default port blocking
+   - **SSH Keys:** click **Add SSH key** → paste output of `cat ~/.ssh/id_ed25519.pub` → name it `mta-tracker`
+   - **Volumes:** skip
+   - **Backups:** skip
+   - **Name:** `mta-tracker`
+3. Click **Create & Buy Now** — server is ready in ~30 seconds
 
-> **If Oracle generates the key instead:** it downloads a `.key` file. Use it to connect:
-> ```bash
-> chmod 400 ~/Downloads/ssh-key-2026-05-13.key
-> ssh -i ~/Downloads/ssh-key-2026-05-13.key ubuntu@<public-ip>
-> ```
-
----
-
-### VM — Step 3: Find the public IP
-
-Once instance state shows **Running**:
-- Oracle Console → **Compute → Instances → mta-tracker** → copy **Public IP address**
-
-**If no public IP is shown:**
-1. **Networking → IP Management → Reserved Public IPs** → **Reserve Public IP Address** → name it `mta-tracker-ip` → **Reserve**
-2. **Compute → Instances → mta-tracker** → **Attached VNICs** → click your VNIC
-3. **IPv4 Addresses** → three-dot menu → **Edit** → set **Public IP type** to **Reserved** → select `mta-tracker-ip` → **Update**
+The public IP is shown immediately in the Hetzner dashboard.
 
 ---
 
-### VM — Step 4: Open firewall ports
-
-1. **Networking → Virtual Cloud Networks** → click your VCN
-2. **Security Lists → Default Security List → Add Ingress Rules**
-
-| Source CIDR | Protocol | Port | Purpose |
-|---|---|---|---|
-| `0.0.0.0/0` | TCP | `19092` | Redpanda Kafka listener (Spark on laptop) |
-| `0.0.0.0/0` | TCP | `8082` | Redpanda Console UI (optional) |
-
----
-
-### VM — Step 5: SSH into the VM
+### VM — Step 3: SSH into the server
 
 ```bash
-# If you pasted your own public key
-ssh ubuntu@<oracle-vm-public-ip>
+ssh root@<hetzner-ip>
 # Type yes to confirm host fingerprint on first connection
-
-# If Oracle generated the key (downloaded .key file)
-chmod 400 ~/Downloads/ssh-key-2026-05-13.key
-ssh -i ~/Downloads/ssh-key-2026-05-13.key ubuntu@<oracle-vm-public-ip>
-
-# Windows full path
-ssh -i "C:/Users/oscar/Downloads/ssh-key-2026-05-13.key" ubuntu@<oracle-vm-public-ip>
 ```
+
+Hetzner uses `root` by default — no `ubuntu` prefix needed.
 
 ---
 
-### VM — Step 6: Install Docker
+### VM — Step 4: Install Docker
 
 ```bash
 sudo apt remove docker docker.io containerd runc -y
@@ -300,36 +264,28 @@ sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-  https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-sudo usermod -aG docker $USER
-newgrp docker
 
 # Verify
 docker --version
 docker compose version
 ```
 
+No `usermod` needed — you are already root on Hetzner.
+
 ---
 
-### VM — Step 7: Add VM SSH key to GitHub
+### VM — Step 5: Add VM SSH key to GitHub
 
 This lets the VM clone your repo.
 
 ```bash
-ssh-keygen -t ed25519 -C "oscarlam84@gmail.com"
-# Press Enter to accept all defaults
 cat ~/.ssh/id_ed25519.pub   # copy the full output
 ```
 
 Go to **GitHub → Settings → SSH and GPG keys → New SSH key**:
-- Title: `oracle-vm`
+- Title: `hetzner-vm`
 - Paste the output → **Add SSH key**
 
 Test:
@@ -340,7 +296,7 @@ ssh -T git@github.com
 
 ---
 
-### VM — Step 8: Clone the repo
+### VM — Step 6: Clone the repo
 
 ```bash
 git clone git@github.com:your-username/MTA-subway-reliability-tracker.git
@@ -351,7 +307,7 @@ cp .env.example .env
 
 ---
 
-### VM — Step 9: Start the broker and producer
+### VM — Step 7: Start the broker and producer
 
 ```bash
 docker compose up -d redpanda redpanda-console gtfs-producer
@@ -359,7 +315,7 @@ docker compose up -d redpanda redpanda-console gtfs-producer
 
 ---
 
-### VM — Step 10: Create topics and set retention
+### VM — Step 8: Create topics and set retention
 
 ```bash
 # Create topics
@@ -389,7 +345,7 @@ Retention is set at the topic level via `rpk` — not as a Redpanda server flag.
 
 ---
 
-### VM — Step 11: Verify producer is running
+### VM — Step 9: Verify producer is running
 
 ```bash
 docker logs -f gtfs-producer
@@ -418,22 +374,19 @@ docker logs --tail 20 gtfs-producer
 
 **Redpanda Console — monitor topics remotely:**
 
-Try opening `http://<oracle-vm-public-ip>:8082` in your browser first. If it times out or fails to load, your ISP is likely blocking non-standard ports. Use SSH port forwarding instead — this tunnels port 8082 through the already-open SSH connection:
+Try opening `http://<hetzner-ip>:8082` in your browser. Hetzner has no default port blocking so this should work directly.
+
+If your ISP blocks port 8082, use SSH port forwarding — open a new terminal on your laptop and keep it running:
 
 ```bash
-# Open a new terminal on your laptop — keep it running while browsing
-# If you used your own SSH key
-ssh -L 8082:localhost:8082 ubuntu@<oracle-vm-public-ip> -N
-
-# If you used Oracle's downloaded .key file
-ssh -i ~/Downloads/ssh-key-2026-05-13.key -L 8082:localhost:8082 ubuntu@<oracle-vm-public-ip> -N
+ssh -L 8082:localhost:8082 root@<hetzner-ip> -N
 ```
 
 Then open `http://localhost:8082` → Topics tab. Close the terminal when done.
 
 ---
 
-### Laptop — Step 12: Set up Python environment
+### Laptop — Step 10: Set up Python environment
 
 ```bash
 python -m venv .venv
@@ -449,7 +402,7 @@ pip install -r requirements.txt
 
 ---
 
-### Laptop — Step 13: Configure environment
+### Laptop — Step 11: Configure environment
 
 ```bash
 cp .env.example .env
@@ -468,13 +421,13 @@ MTA_STATIC_GTFS_URL=http://web.mta.info/developers/data/nyct/subway/google_trans
 
 **`MTA_STATIC_GTFS_URL`** — pre-filled. Only change if MTA moves the file.
 
-#### Kafka (Redpanda) — point to Oracle VM
+#### Kafka (Redpanda) — point to Hetzner VM
 
 ```
-KAFKA_BOOTSTRAP_SERVERS=<oracle-vm-public-ip>:19092   ← fill in with your VM's public IP
+KAFKA_BOOTSTRAP_SERVERS=<hetzner-ip>:19092   ← fill in with your Hetzner server IP
 ```
 
-Find your VM's public IP in Oracle Cloud Console → **Compute → Instances → your instance → Public IP address**. Port `19092` is Redpanda's external listener. Port `9092` is internal (Docker-only) — do not use it here.
+Find your server IP in the Hetzner dashboard → your project → server list. Port `19092` is Redpanda's external listener. Port `9092` is internal (Docker-only) — do not use it here.
 
 ```
 KAFKA_TOPIC_TRIP_UPDATES=mta.trip_updates
@@ -586,7 +539,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 ---
 
-### Laptop — Step 14: Load static schedule (one-time)
+### Laptop — Step 12: Load static schedule (one-time)
 
 Required before Spark can compute `on_time_pct`. Re-run weekly.
 
@@ -600,7 +553,7 @@ python -m src.ingestion.static_schedule
 
 ---
 
-### Laptop — Step 15: Run the Spark streaming job
+### Laptop — Step 13: Run the Spark streaming job
 
 Build the Spark image once (bakes in all JARs and Python packages):
 
@@ -630,7 +583,7 @@ INFO src.load.postgres_writer batch_id=11 upserted 1328 rows to reliability_metr
 **Verify:**
 
 1. **Spark Master UI** — `http://localhost:8081` → Running Applications → `mta-reliability-streaming`
-2. **Redpanda Console** — `http://<oracle-vm-public-ip>:8082` → Topics → `mta.trip_updates` → Consumers tab — lag decreasing rapidly
+2. **Redpanda Console** — `http://<hetzner-ip>:8082` → Topics → `mta.trip_updates` → Consumers tab — lag decreasing rapidly
 3. **Postgres** — after ~10 minutes:
 
 ```bash
@@ -640,7 +593,7 @@ docker exec -it postgres psql -U mta -d mta -c "SELECT COUNT(*) FROM reliability
 
 ---
 
-### Laptop — Step 16: Start the API and dashboard
+### Laptop — Step 14: Start the API and dashboard
 
 Open a new terminal tab — spark-submit stays attached in its own tab.
 
@@ -657,7 +610,7 @@ curl "http://localhost:8000/reliability?line=A&station=A27N&window=6h"
 
 ---
 
-### Laptop — Step 17: Airflow cold-path compaction (occasional)
+### Laptop — Step 15: Airflow cold-path compaction (occasional)
 
 Only needed to load S3 Parquet into Snowflake. Start it, run the DAG, then stop it.
 
