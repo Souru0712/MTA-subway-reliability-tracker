@@ -14,6 +14,8 @@ deployments:
       name: managed-pool
       work_queue_name: default
       job_variables:
+        pip_packages:
+          - "prefect==3.4.0"
         env:
           AWS_ACCESS_KEY_ID: "{{ prefect.variables.aws_access_key_id }}"
           AWS_SECRET_ACCESS_KEY: "{{ prefect.variables.aws_secret_access_key }}"
