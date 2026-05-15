@@ -19,7 +19,7 @@ def main() -> None:
     print(f"Loading S3 partition: dt={ds}")
 
     bucket = os.environ["S3_BUCKET"]
-    prefix = f"raw/trip_updates/dt={ds}/"
+    prefix = f"trip_updates/dt={ds}/"
 
     import boto3
     client = boto3.client("s3")
