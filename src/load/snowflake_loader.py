@@ -58,7 +58,8 @@ def copy_from_s3(
     cur = conn.cursor()
     cur.execute(sql)
     result = cur.fetchone()
-    rows_loaded = result[3] if result else 0
+    # result[3] is rows_loaded when files are copied; shorter tuple means no new files
+    rows_loaded = result[3] if result and len(result) > 3 else 0
     cur.close()
     logger.info("COPY INTO loaded %d rows from %s", rows_loaded, s3_prefix)
     return rows_loaded
