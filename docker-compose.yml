@@ -1,24 +1,3 @@
-x-airflow-common: &airflow-common
-  image: apache/airflow:2.8.1
-  env_file:
-    - .env
-  environment:
-    AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
-    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
-    AIRFLOW_CONN_SNOWFLAKE_DEFAULT: "snowflake://${SNOWFLAKE_USER}:${SNOWFLAKE_PASSWORD}@${SNOWFLAKE_ACCOUNT}/?warehouse=${SNOWFLAKE_WAREHOUSE}&database=${SNOWFLAKE_DATABASE}&role=${SNOWFLAKE_ROLE}"
-    AIRFLOW_CONN_AWS_DEFAULT: "aws://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@/?region_name=${AWS_DEFAULT_REGION}"
-  volumes:
-    - ./dags:/opt/airflow/dags
-    - ./src:/opt/airflow/src
-    - ./config:/opt/airflow/config
-    - airflow-logs:/opt/airflow/logs
-  depends_on:
-    postgres:
-      condition: service_healthy
-
 services:
   # ── Kafka (Redpanda) ────────────────────────────────────────────────────────
   redpanda:
@@ -148,37 +127,6 @@ services:
         condition: service_healthy
     restart: on-failure
 
-  # ── Airflow ─────────────────────────────────────────────────────────────────
-  airflow-init:
-    <<: *airflow-common
-    container_name: airflow-init
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        airflow db upgrade
-        airflow users create \
-          --username admin \
-          --password admin \
-          --firstname Admin \
-          --lastname User \
-          --role Admin \
-          --email oscarlam84@gmail.com
-
-  airflow-webserver:
-    <<: *airflow-common
-    container_name: airflow-webserver
-    command: webserver
-    ports:
-      - "8080:8080"
-    restart: on-failure
-
-  airflow-scheduler:
-    <<: *airflow-common
-    container_name: airflow-scheduler
-    command: scheduler
-    restart: on-failure
-
   # ── Grafana ─────────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.3.3
@@ -198,5 +146,4 @@ services:
 volumes:
   redpanda-data:
   postgres-data:
-  airflow-logs:
   grafana-data:

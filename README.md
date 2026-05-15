@@ -43,7 +43,7 @@ window_start         route_id   on_time_pct   delay_p95
 
 Answers: *Is the 4 train running on time right now? Which line has the worst delay today?*
 
-**Cold path** — Spark writes every individual event to S3 Parquet, partitioned by date, with no aggregation. Nothing is thrown away. Airflow loads these files into Snowflake daily.
+**Cold path** — Spark writes every individual event to S3 Parquet, partitioned by date, with no aggregation. Nothing is thrown away. Prefect loads these files into Snowflake daily.
 
 ```
 event_time            route_id   stop_id   delay_seconds
@@ -56,9 +56,9 @@ Answers: *What is the average delay at Times Square on weekday mornings? Does th
 
 The hot path gives you fast pre-computed answers for monitoring. The cold path keeps everything so you can ask questions you didn't think of when you built the pipeline.
 
-### Why Airflow reads S3 and not Postgres
+### Why Prefect reads S3 and not Postgres
 
-Airflow loads raw events from S3 into Snowflake — not the aggregated metrics from Postgres. Snowflake gets the original unaggregated data so you can recompute any metric, at any granularity, using SQL on months of history. If the 5-minute window in Spark turns out to be the wrong resolution, the raw data in Snowflake lets you recompute at 1-minute or 1-hour without re-running the pipeline.
+Prefect loads raw events from S3 into Snowflake — not the aggregated metrics from Postgres. Snowflake gets the original unaggregated data so you can recompute any metric, at any granularity, using SQL on months of history. If the 5-minute window in Spark turns out to be the wrong resolution, the raw data in Snowflake lets you recompute at 1-minute or 1-hour without re-running the pipeline.
 
 ---
 
@@ -87,7 +87,7 @@ reliability_metrics   raw/dt=YYYY-MM-DD/
    ├── FastAPI  GET /reliability?line=4&window=1d
    └── Grafana  live dashboard
 
-S3 Parquet  →  (Airflow, daily 3 AM)  →  Snowflake RAW.MTA_EVENTS
+S3 Parquet  →  (Prefect, daily 3 AM)  →  Snowflake RAW.MTA_EVENTS
 ```
 
 ---
@@ -105,7 +105,7 @@ S3 Parquet  →  (Airflow, daily 3 AM)  →  Snowflake RAW.MTA_EVENTS
 | Long-term store | Snowflake |
 | Serving | FastAPI + asyncpg |
 | Dashboard | Grafana 10 (auto-provisioned over Postgres) |
-| Orchestration | Airflow 2.8 (daily S3 → Snowflake compaction) |
+| Orchestration | Prefect 3 (daily S3 → Snowflake compaction, hosted scheduler) |
 | Container | Docker Compose |
 
 ---
@@ -129,8 +129,9 @@ S3 Parquet  →  (Airflow, daily 3 AM)  →  Snowflake RAW.MTA_EVENTS
 │   ├── main.py                 # FastAPI app + GET /reliability
 │   ├── db.py                   # asyncpg pool + window param parsing
 │   └── models.py               # Pydantic response models
-├── dags/
-│   └── dag_mta_s3_to_snowflake.py  # Daily compaction DAG
+├── flows/
+│   └── mta_s3_to_snowflake.py      # Prefect flow: daily S3 → Snowflake compaction
+├── prefect.yaml                     # Prefect deployment config (schedule + worker pool)
 ├── infra/
 │   ├── postgres/init.sql       # DDL for reliability_metrics table
 │   ├── grafana/provisioning/   # Auto-provisioned datasource + dashboard
@@ -154,7 +155,7 @@ Hetzner VM (~$7/month, always on)   Laptop (run weekly or on demand)
 redpanda                            spark-master + spark-worker
 gtfs-producer                       postgres
 redpanda-console                    fastapi + grafana
-                                    airflow (occasional)
+                                    prefect deploy (one-time)
 ```
 
 **How it works:**
@@ -480,7 +481,7 @@ SNOWFLAKE_DATABASE=MTA
 SNOWFLAKE_ROLE=MTA_TRANSFORMER
 ```
 
-Only needed for the Airflow DAG. If skipping Snowflake, leave blank.
+Only needed for the Prefect flow. If skipping Snowflake, leave blank.
 
 **`SNOWFLAKE_ACCOUNT`** — account identifier from the bottom-left of the Snowflake UI. Looks like `xy12345.us-east-1`.
 
@@ -518,24 +519,9 @@ SHOW GRANTS TO ROLE MTA_TRANSFORMER;
 SHOW STAGES IN SCHEMA MTA.RAW;
 ```
 
-#### Airflow internals
+#### Prefect
 
-```
-AIRFLOW_UID=50000
-AIRFLOW__CORE__EXECUTOR=LocalExecutor
-AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-AIRFLOW__CORE__FERNET_KEY=    ← generate this
-AIRFLOW__CORE__LOAD_EXAMPLES=false
-AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
-```
-
-**`AIRFLOW_UID`** — on Linux change to your UID (`id -u`) to avoid volume permission issues.
-
-**`AIRFLOW__CORE__FERNET_KEY`** ⚠️ — generate with venv active:
-
-```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
+No env vars needed. Authentication is handled via `prefect cloud login` — see Step 15.
 
 ---
 
@@ -599,42 +585,119 @@ Open a new terminal tab — spark-submit stays attached in its own tab.
 
 ```bash
 docker compose up -d fastapi grafana
+```
 
-# API
+**FastAPI:**
+
+```bash
 curl "http://localhost:8000/reliability?line=4&window=1d"
 curl "http://localhost:8000/reliability?line=A&station=A27N&window=6h"
-
-# Grafana — open http://localhost:3000  (admin / admin)
-# Dashboards → MTA Subway Reliability
 ```
+
+Or open in browser: `http://localhost:8000/docs` for the interactive API spec.
 
 ---
 
-### Laptop — Step 15: Airflow cold-path compaction (occasional)
+**Grafana dashboard:**
 
-Only needed to load S3 Parquet into Snowflake. Start it, run the DAG, then stop it.
+1. Open `http://localhost:3000` — login with `admin` / `admin`
+2. Left sidebar → **Dashboards** → click **MTA Subway Reliability**
+3. The dashboard has 4 panels:
+   - **On-Time % per Line** — time-series of on-time percentage per route (last 6h)
+   - **Top 10 Worst Stations** — bar gauge of p95 delay by stop (last 1h)
+   - **Last 20 Windows** — raw table of recent aggregation windows
+   - **System On-Time %** — single stat showing system-wide average (last 30 min)
+
+**If panels show "No data":** Spark hasn't completed 2 full 5-minute windows yet. Wait ~10 minutes after starting spark-submit.
+
+---
+
+**Grafana — verify Postgres datasource is connected:**
+
+1. Left sidebar → **Connections → Data sources**
+2. Click **MTA-Postgres**
+3. Scroll to bottom → click **Save & test**
+4. Expect: green checkmark — **Database Connection OK**
+
+If the test fails, Postgres container is not running — check `docker compose ps`.
+
+---
+
+### Laptop — Step 15: Prefect cold-path compaction (daily, scheduled)
+
+Prefect Cloud runs the flow in its own managed infrastructure — no worker, no container, no VM needed. Prefect pulls the code directly from GitHub at run time.
+
+**Free tier limits:** 500 runs/month, 3 concurrent runs. One daily run uses 30 runs/month — well within limits.
+
+---
+
+**One-time setup:**
+
+**1. Create a Prefect Cloud account**
+
+Go to [app.prefect.cloud](https://app.prefect.cloud) → sign up → create a workspace.
+
+**2. Install Prefect and log in (laptop)**
 
 ```bash
-docker compose up -d airflow-init airflow-webserver airflow-scheduler
-# Open http://localhost:8080  (admin / admin)
-# Unpause dag_mta_s3_to_snowflake
+pip install "prefect>=3.0,<4.0"
+prefect cloud login
+# follow the browser prompt to authenticate
 ```
 
-**Backfill missed days** — one trigger per day. `COPY INTO` is idempotent so re-running the same date is safe:
+**3. Create a managed work pool**
 
 ```bash
-docker exec airflow-scheduler airflow dags trigger dag_mta_s3_to_snowflake \
-  --exec-date 2026-05-10T03:00:00+00:00
-
-docker exec airflow-scheduler airflow dags trigger dag_mta_s3_to_snowflake \
-  --exec-date 2026-05-11T03:00:00+00:00
+prefect work-pool create managed-pool --type prefect:managed
 ```
 
-When done:
+**4. Add credentials as Prefect Variables**
+
+Prefect injects these as environment variables when the flow runs. Add them in the UI:
+
+Go to [app.prefect.cloud](https://app.prefect.cloud) → your workspace → left sidebar → **Variables** → **Add Variable** for each:
+
+| Name | Value |
+|---|---|
+| `aws_access_key_id` | your AWS access key |
+| `aws_secret_access_key` | your AWS secret key |
+| `snowflake_account` | your Snowflake account identifier |
+| `snowflake_user` | `mta_svc` |
+| `snowflake_password` | your Snowflake password |
+| `s3_bucket` | your S3 bucket name |
+
+These are referenced in `prefect.yaml` under `job_variables.env` and automatically injected at runtime.
+
+**5. Update `prefect.yaml` with your GitHub repo**
+
+Open `prefect.yaml` and replace `your-username` with your actual GitHub username:
+
+```yaml
+pull:
+  - prefect.deployments.steps.git_clone:
+      repository: git@github.com:your-username/MTA-subway-reliability-tracker.git
+      branch: main
+```
+
+**6. Deploy the flow**
 
 ```bash
-docker compose stop airflow-webserver airflow-scheduler
+prefect deploy --name mta-s3-to-snowflake
 ```
+
+Prefect Cloud registers the flow and schedules it for 3 AM daily. It pulls the latest code from GitHub on every run — any `git push` is automatically picked up.
+
+---
+
+**Backfill missed days** — trigger manually from your laptop. `COPY INTO` is idempotent so re-running the same date is safe:
+
+```bash
+prefect deployment run mta-s3-to-snowflake/mta-s3-to-snowflake --param ds=2026-05-10
+prefect deployment run mta-s3-to-snowflake/mta-s3-to-snowflake --param ds=2026-05-11
+prefect deployment run mta-s3-to-snowflake/mta-s3-to-snowflake --param ds=2026-05-12
+```
+
+Monitor runs at [app.prefect.cloud](https://app.prefect.cloud) → **Runs** tab.
 
 ---
 
@@ -741,14 +804,12 @@ curl "http://localhost:8000/reliability?line=4&window=1d"
 
 ---
 
-### Step 8: Airflow cold-path compaction (occasional)
+### Step 8: Prefect cold-path compaction
+
+Follow the same Prefect setup from Approach 1 — Step 15. The worker can run on your local machine instead of Hetzner:
 
 ```bash
-docker compose up -d airflow-init airflow-webserver airflow-scheduler
-# http://localhost:8080  (admin / admin)
-# Unpause dag_mta_s3_to_snowflake
-
-docker compose stop airflow-webserver airflow-scheduler  # when done
+prefect worker start --pool hetzner-pool
 ```
 
 ---
@@ -792,13 +853,13 @@ Query windowed reliability metrics from Postgres.
 
 | Service | URL |
 |---|---|
-| Redpanda Console | http://localhost:8082 |
+| Redpanda Console (VM) | http://\<hetzner-ip\>:8082 |
 | Spark Master UI | http://localhost:8081 |
 | FastAPI | http://localhost:8000 |
 | FastAPI docs | http://localhost:8000/docs |
-| Airflow | http://localhost:8080 |
 | Grafana | http://localhost:3000 |
 | Postgres | localhost:5432 |
+| Prefect Cloud | https://app.prefect.cloud |
 
 ---
 
@@ -812,6 +873,7 @@ Query windowed reliability metrics from Postgres.
 | Two streaming queries | Separate `checkpointLocation` each | Prevents checkpoint corruption on restart |
 | Postgres upsert | `ON CONFLICT DO UPDATE` | Replay-safe — reprocessing a window never duplicates |
 | Cold-path writer | Spark native `writeStream.format("parquet")` | pandas BytesIO pattern doesn't work in streaming |
+| Orchestration | Prefect Cloud | No containers needed — hosted scheduler, worker runs on Hetzner VM |
 
 ---
 
