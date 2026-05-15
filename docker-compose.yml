@@ -70,6 +70,7 @@ services:
     ports:
       - "7077:7077"
       - "8081:8080"   # Spark master web UI
+      - "4040:4040"   # Spark application UI (active while spark-submit runs)
     volumes:
       - ./src:/opt/spark/work/src
       - ./config:/opt/spark/work/config
