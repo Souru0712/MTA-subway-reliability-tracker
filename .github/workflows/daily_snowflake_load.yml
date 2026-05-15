@@ -1,0 +1,45 @@
+name: Daily S3 → Snowflake Load
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 3 AM UTC daily
+  workflow_dispatch:        # allow manual trigger with optional date param
+    inputs:
+      ds:
+        description: "Date to load (YYYY-MM-DD). Defaults to yesterday."
+        required: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install \
+            boto3==1.34.0 \
+            snowflake-connector-python==3.7.0 \
+            python-dotenv==1.0.1
+
+      - name: Run S3 → Snowflake load
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+          SNOWFLAKE_DATABASE: MTA
+          SNOWFLAKE_ROLE: MTA_TRANSFORMER
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          DS: ${{ github.event.inputs.ds }}
+        run: python .github/scripts/run_snowflake_load.py
