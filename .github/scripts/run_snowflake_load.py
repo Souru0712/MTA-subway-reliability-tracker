@@ -29,7 +29,21 @@ def main() -> None:
         print(f"No S3 objects found at s3://{bucket}/{prefix} — skipping.")
         sys.exit(0)
 
-    cfg = Config()
+    # build a minimal config — only Snowflake fields needed here
+    from dataclasses import dataclass
+
+    @dataclass
+    class SnowflakeConfig:
+        snowflake_account: str = os.environ["SNOWFLAKE_ACCOUNT"]
+        snowflake_user: str = os.environ["SNOWFLAKE_USER"]
+        snowflake_password: str = os.environ["SNOWFLAKE_PASSWORD"]
+        snowflake_warehouse: str = os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
+        snowflake_database: str = os.environ.get("SNOWFLAKE_DATABASE", "MTA")
+        snowflake_role: str = os.environ.get("SNOWFLAKE_ROLE", "MTA_TRANSFORMER")
+        snowflake_stage: str = "RAW.S3_STAGE"
+        snowflake_raw_table: str = "RAW.MTA_EVENTS"
+
+    cfg = SnowflakeConfig()
     conn = get_connection(cfg)
     try:
         ensure_table(conn)
