@@ -55,9 +55,6 @@ def read_kafka_stream(spark: SparkSession, cfg: Config):
         .option("subscribe", cfg.kafka_topic_trip_updates)
         .option("startingOffsets", "earliest")
         .option("failOnDataLoss", "false")
-        # force all connections through bootstrap server, ignore advertised addresses
-        .option("kafka.client.dns.lookup", "use_all_dns_ips")
-        .option("kafka.security.protocol", "PLAINTEXT")
         .load()
     )
 
