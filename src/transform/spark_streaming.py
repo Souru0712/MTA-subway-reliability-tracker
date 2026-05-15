@@ -53,7 +53,7 @@ def read_kafka_stream(spark: SparkSession, cfg: Config):
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", cfg.kafka_bootstrap_servers)
         .option("subscribe", cfg.kafka_topic_trip_updates)
-        .option("startingOffsets", "latest")
+        .option("startingOffsets", "earliest")
         .option("failOnDataLoss", "false")
         .load()
     )
