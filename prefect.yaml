@@ -14,8 +14,6 @@ deployments:
       name: managed-pool
       work_queue_name: default
       job_variables:
-        pip_packages:
-          - "prefect==3.4.0"
         env:
           AWS_ACCESS_KEY_ID: "{{ prefect.variables.aws_access_key_id }}"
           AWS_SECRET_ACCESS_KEY: "{{ prefect.variables.aws_secret_access_key }}"
@@ -32,5 +30,5 @@ deployments:
       timezone: "America/New_York"
     pull:
       - prefect.deployments.steps.git_clone:
-          repository: git@github.com:your-username/MTA-subway-reliability-tracker.git
+          repository: https://github.com/your-username/MTA-subway-reliability-tracker.git
           branch: main
