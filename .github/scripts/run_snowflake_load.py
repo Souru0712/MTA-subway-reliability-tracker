@@ -9,7 +9,6 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.load.snowflake_loader import copy_from_s3, ensure_table, get_connection
-from config.settings import Config
 
 
 def main() -> None:
