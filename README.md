@@ -657,16 +657,16 @@ Prefect injects these as environment variables when the flow runs. Add them in t
 
 Go to [app.prefect.cloud](https://app.prefect.cloud) → your workspace → left sidebar → **Variables** → **Add Variable** for each:
 
-| Name | Value |
+| Name | Value (JSON string — wrap in quotes) |
 |---|---|
-| `aws_access_key_id` | your AWS access key |
-| `aws_secret_access_key` | your AWS secret key |
-| `snowflake_account` | your Snowflake account identifier |
-| `snowflake_user` | `mta_svc` |
-| `snowflake_password` | your Snowflake password |
-| `s3_bucket` | your S3 bucket name |
+| `aws_access_key_id` | `"AKIAIOSFODNN7EXAMPLE"` |
+| `aws_secret_access_key` | `"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"` |
+| `snowflake_account` | `"xy12345.us-east-1"` |
+| `snowflake_user` | `"mta_svc"` |
+| `snowflake_password` | `"your-password"` |
+| `s3_bucket` | `"mta-tracker-yourname-2026"` |
 
-These are referenced in `prefect.yaml` under `job_variables.env` and automatically injected at runtime.
+Values must be valid JSON — wrap each string value in double quotes. These are referenced in `prefect.yaml` under `job_variables.env` and automatically injected as environment variables at runtime.
 
 **5. Update `prefect.yaml` with your GitHub repo**
 

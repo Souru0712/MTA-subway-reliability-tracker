@@ -1,5 +1,5 @@
 name: mta-reliability-tracker
-prefect-version: "3.0"
+prefect-version: "3.4.0"
 
 deployments:
   - name: mta-s3-to-snowflake
