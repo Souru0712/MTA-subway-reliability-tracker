@@ -1,8 +1,8 @@
 """
 Spark Structured Streaming job — cold path only.
 
-Reads mta.trip_updates and mta.vehicle_positions from Kafka, parses each
-message, and writes raw events to S3 Parquet partitioned by dt=YYYY-MM-DD.
+Reads mta.trip_updates, mta.vehicle_positions, and mta.alerts from Kafka,
+parses each message, and writes raw events to S3 Parquet partitioned by dt=YYYY-MM-DD.
 
 No aggregation — all analysis is done downstream in Snowflake.
 
