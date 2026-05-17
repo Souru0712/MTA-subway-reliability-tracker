@@ -70,8 +70,6 @@ SQL aggregations at query time
 
 | Layer | Technology |
 |---|---|
-| Layer | Technology |
-|---|---|
 | Language | Python 3.11 |
 | Ingest | MTA GTFS-Realtime API, Python `gtfs-realtime-bindings` |
 | Broker | Redpanda (Kafka-compatible, no ZooKeeper) |
@@ -121,17 +119,16 @@ A Hetzner CPX11 runs the broker and producer 24/7 at ~$7/month. Your laptop conn
 Hetzner VM (~$7/month, always on)   Laptop (run weekly or on demand)
 ─────────────────────────────────   ──────────────────────────────────
 redpanda                            spark-master + spark-worker
-gtfs-producer                       postgres
-redpanda-console                    fastapi + grafana
-                                    prefect deploy (one-time)
+gtfs-producer                       GitHub Actions (daily, no container)
+redpanda-console
 ```
 
 **How it works:**
 - The VM runs continuously, polling MTA feeds every 30s and accumulating messages in Redpanda (up to 10GB / ~7 days retention)
 - Redpanda acts as a durable buffer — messages are not lost when Spark is off
 - When you're ready to process, start Spark on your laptop pointed at the VM's Redpanda
-- Spark reads the entire backlog at ~1000× the producer rate — a week of data clears in ~10 minutes
-- Results land in Postgres (hot) and S3 (cold) as normal
+- Spark reads the entire backlog and writes raw events to S3 Parquet
+- GitHub Actions loads S3 → Snowflake daily at 3 AM
 
 **Cost:** ~$7/month for a Hetzner CPX11 (2 vCPU, 2GB RAM).
 
@@ -406,14 +403,6 @@ KAFKA_TOPIC_ALERTS=mta.alerts
 
 **`KAFKA_TOPIC_*`** — pre-filled. Leave as-is.
 
-#### Postgres
-
-```
-POSTGRES_MTA_DSN=postgresql://mta:mta@localhost:5432/mta
-```
-
-**`POSTGRES_MTA_DSN`** — pre-filled. Created automatically by `infra/postgres/init.sql` on first container start.
-
 #### AWS / S3
 
 ```
@@ -449,7 +438,7 @@ SNOWFLAKE_DATABASE=MTA
 SNOWFLAKE_ROLE=MTA_TRANSFORMER
 ```
 
-Only needed for the Prefect flow. If skipping Snowflake, leave blank.
+Only needed for the GitHub Actions daily load. If skipping Snowflake, leave blank.
 
 **`SNOWFLAKE_ACCOUNT`** — account identifier from the bottom-left of the Snowflake UI. Looks like `xy12345.us-east-1`.
 
@@ -487,33 +476,16 @@ SHOW GRANTS TO ROLE MTA_TRANSFORMER;
 SHOW STAGES IN SCHEMA MTA.RAW;
 ```
 
-#### Prefect
-
-No env vars needed. Authentication is handled via `prefect cloud login` — see Step 15.
 
 ---
 
-### Laptop — Step 12: Load static schedule (one-time)
-
-Required before Spark can compute `on_time_pct`. Re-run weekly.
-
-```bash
-python -m src.ingestion.static_schedule
-# Expected:
-  2026-05-13 03:53:02,222 INFO __main__ Downloading static GTFS ...
-  2026-05-13 03:53:03,376 INFO __main__ Flat schedule: 562755 rows, 29 unique routes
-  2026-05-13 03:53:21,829 INFO __main__ Wrote 562755 rows to s3://...
-```
-
----
-
-### Laptop — Step 13: Run the Spark streaming job
+### Laptop — Step 12: Run the Spark streaming job
 
 Build the Spark image once (bakes in all JARs and Python packages):
 
 ```bash
 docker compose build spark-master spark-worker
-docker compose up -d spark-master postgres
+docker compose up -d spark-master
 ```
 
 Run the streaming job (stays attached — dedicate a terminal tab):
@@ -528,150 +500,48 @@ docker exec spark-master /opt/spark/bin/spark-submit \
   /opt/spark/work/src/transform/spark_streaming.py
 ```
 
-Spark drains the entire VM backlog immediately — a week of data clears in ~10 minutes. Expected output:
-
-```
-INFO src.load.postgres_writer batch_id=11 upserted 1328 rows to reliability_metrics
-```
+Spark drains the full Redpanda backlog and writes raw events to S3 Parquet.
 
 **Verify:**
 
 1. **Spark Master UI** — `http://localhost:8081` → Running Applications → `mta-reliability-streaming`
-2. **Redpanda Console** — `http://<hetzner-ip>:8082` → Topics → `mta.trip_updates` → Consumers tab — lag decreasing rapidly
-3. **Postgres** — after ~10 minutes:
-
-```bash
-docker exec -it postgres psql -U mta -d mta -c "SELECT COUNT(*) FROM reliability_metrics;"
-# Expect: count > 0
-
-docker exec -it postgres psql -U mta -d mta -c "
-SELECT window_start, window_end, route_id, on_time_pct, sample_count 
-FROM reliability_metrics 
-ORDER BY window_start DESC 
-LIMIT 5;"
-```
+2. **Spark Application UI** — `http://localhost:4040` → Streaming tab → Input Rate increasing
+3. **Redpanda Console** — `http://<hetzner-ip>:8082` → Topics → `mta.trip_updates` → Consumers tab — lag decreasing
+4. **S3** — check files appear under `s3://your-bucket/raw/trip_updates/dt=YYYY-MM-DD/`
 
 ---
 
-### Laptop — Step 14: Start the API and dashboard
+### Laptop — Step 13: GitHub Actions — daily S3 → Snowflake load
 
-Open a new terminal tab — spark-submit stays attached in its own tab.
+GitHub Actions runs the daily compaction in GitHub's cloud — no containers, no VM, free for public repos.
 
-```bash
-docker compose up -d fastapi grafana
-```
+**One-time setup — add repository secrets:**
 
-**FastAPI:**
+Go to your GitHub repo → **Settings → Secrets and variables → Actions → New repository secret** for each:
 
-```bash
-curl "http://localhost:8000/reliability?line=4&window=1d"
-curl "http://localhost:8000/reliability?line=A&station=A27N&window=6h"
-```
-
-Or open in browser: `http://localhost:8000/docs` for the interactive API spec.
-
----
-
-**Grafana dashboard:**
-
-1. Open `http://localhost:3000` — login with `admin` / `admin`
-2. Left sidebar → **Dashboards** → click **MTA Subway Reliability**
-3. The dashboard has 4 panels:
-   - **On-Time % per Line** — time-series of on-time percentage per route (last 6h)
-   - **Top 10 Worst Stations** — bar gauge of p95 delay by stop (last 1h)
-   - **Last 20 Windows** — raw table of recent aggregation windows
-   - **System On-Time %** — single stat showing system-wide average (last 30 min)
-
-**If panels show "No data":** Spark hasn't completed 2 full 5-minute windows yet. Wait ~10 minutes after starting spark-submit.
-
----
-
-**Grafana — verify Postgres datasource is connected:**
-
-1. Left sidebar → **Connections → Data sources**
-2. Click **MTA-Postgres**
-3. Scroll to bottom → click **Save & test**
-4. Expect: green checkmark — **Database Connection OK**
-
-If the test fails, Postgres container is not running — check `docker compose ps`.
-
----
-
-### Laptop — Step 15: Prefect cold-path compaction (daily, scheduled)
-
-Prefect Cloud runs the flow in its own managed infrastructure — no worker, no container, no VM needed. Prefect pulls the code directly from GitHub at run time.
-
-**Free tier limits:** 500 runs/month, 3 concurrent runs. One daily run uses 30 runs/month — well within limits.
-
----
-
-**One-time setup:**
-
-**1. Create a Prefect Cloud account**
-
-Go to [app.prefect.cloud](https://app.prefect.cloud) → sign up → create a workspace.
-
-**2. Install Prefect and log in (laptop)**
-
-```bash
-pip install "prefect>=3.0,<4.0"
-prefect cloud login
-# follow the browser prompt to authenticate
-```
-
-**3. Create a managed work pool**
-
-```bash
-prefect work-pool create managed-pool --type prefect:managed
-```
-
-**4. Add credentials as Prefect Variables**
-
-Prefect injects these as environment variables when the flow runs. Add them in the UI:
-
-Go to [app.prefect.cloud](https://app.prefect.cloud) → your workspace → left sidebar → **Variables** → **Add Variable** for each:
-
-| Name | Value (JSON string — wrap in quotes) |
+| Secret name | Value |
 |---|---|
-| `aws_access_key_id` | `"AKIAIOSFODNN7EXAMPLE"` |
-| `aws_secret_access_key` | `"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"` |
-| `snowflake_account` | `"xy12345.us-east-1"` |
-| `snowflake_user` | `"mta_svc"` |
-| `snowflake_password` | `"your-password"` |
-| `s3_bucket` | `"mta-tracker-yourname-2026"` |
+| `AWS_ACCESS_KEY_ID` | your AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | your AWS secret key |
+| `SNOWFLAKE_ACCOUNT` | your Snowflake account identifier |
+| `SNOWFLAKE_USER` | `mta_svc` |
+| `SNOWFLAKE_PASSWORD` | your Snowflake password |
+| `S3_BUCKET` | your S3 bucket name |
 
-Values must be valid JSON — wrap each string value in double quotes. These are referenced in `prefect.yaml` under `job_variables.env` and automatically injected as environment variables at runtime.
+The workflow `.github/workflows/daily_snowflake_load.yml` runs automatically at 3 AM UTC daily.
 
-**5. Update `prefect.yaml` with your GitHub repo**
+**Backfill missed days** — trigger manually from the GitHub UI:
 
-Open `prefect.yaml` and replace `your-username` with your actual GitHub username:
+1. GitHub repo → **Actions** tab
+2. Left sidebar → **Daily S3 → Snowflake Load**
+3. **Run workflow** → enter date (e.g. `2026-05-13`) → **Run workflow**
 
-```yaml
-pull:
-  - prefect.deployments.steps.git_clone:
-      repository: git@github.com:your-username/MTA-subway-reliability-tracker.git
-      branch: main
-```
-
-**6. Deploy the flow**
-
+Or via CLI:
 ```bash
-prefect deploy --name mta-s3-to-snowflake
+gh workflow run daily_snowflake_load.yml -f ds=2026-05-13
 ```
 
-Prefect Cloud registers the flow and schedules it for 3 AM daily. It pulls the latest code from GitHub on every run — any `git push` is automatically picked up.
-
----
-
-**Backfill missed days** — trigger manually from your laptop. `COPY INTO` is idempotent so re-running the same date is safe:
-
-```bash
-prefect deployment run mta-s3-to-snowflake/mta-s3-to-snowflake --param ds=2026-05-10
-prefect deployment run mta-s3-to-snowflake/mta-s3-to-snowflake --param ds=2026-05-11
-prefect deployment run mta-s3-to-snowflake/mta-s3-to-snowflake --param ds=2026-05-12
-```
-
-Monitor runs at [app.prefect.cloud](https://app.prefect.cloud) → **Runs** tab.
+`COPY INTO` is idempotent — re-running the same date is safe.
 
 ---
 
@@ -710,7 +580,7 @@ Fill in all sections using the same variable descriptions from Approach 1 above.
 ### Step 3: Start core infrastructure
 
 ```bash
-docker compose up -d redpanda postgres
+docker compose up -d redpanda
 
 # Create Kafka topics
 docker exec -it redpanda rpk topic create \
@@ -721,15 +591,7 @@ docker exec -it redpanda rpk topic create \
 
 ---
 
-### Step 4: Load static schedule (one-time)
-
-```bash
-python -m src.ingestion.static_schedule
-```
-
----
-
-### Step 5: Start the producer
+### Step 4: Start the producer
 
 ```bash
 docker compose up -d gtfs-producer
@@ -741,7 +603,7 @@ docker logs -f gtfs-producer
 
 ---
 
-### Step 6: Run the Spark streaming job
+### Step 5: Run the Spark streaming job
 
 ```bash
 docker compose build spark-master spark-worker
@@ -757,69 +619,17 @@ docker exec spark-master /opt/spark/bin/spark-submit \
   /opt/spark/work/src/transform/spark_streaming.py
 ```
 
-After ~10 minutes verify:
+After Spark runs, verify files landed in S3:
 
 ```bash
-docker exec -it postgres psql -U mta -d mta -c "SELECT COUNT(*) FROM reliability_metrics;"
-# Expect: count > 0
+aws s3 ls s3://your-bucket-name/raw/trip_updates/ --recursive | head -10
 ```
 
 ---
 
-### Step 7: Start the API and dashboard
+### Step 6: GitHub Actions — daily S3 → Snowflake load
 
-```bash
-# Tab 3
-docker compose up -d fastapi grafana
-
-curl "http://localhost:8000/reliability?line=4&window=1d"
-# Grafana — http://localhost:3000  (admin / admin) → Dashboards → MTA Subway Reliability
-```
-
----
-
-### Step 8: Prefect cold-path compaction
-
-Follow the same Prefect setup from Approach 1 — Step 15. The worker can run on your local machine instead of Hetzner:
-
-```bash
-prefect worker start --pool hetzner-pool
-```
-
----
-
-## API Reference
-
-### `GET /reliability`
-
-Query windowed reliability metrics from Postgres.
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `line` | string | ✅ | Route ID — e.g. `4`, `A`, `L` |
-| `window` | string | ✅ | Lookback: `1h`, `6h`, `12h`, `1d`, `7d` |
-| `station` | string | ❌ | Optional `stop_id` filter |
-
-**Example response:**
-
-```json
-{
-  "line": "4",
-  "window": "1d",
-  "records": [
-    {
-      "window_start": "2026-04-28T12:00:00Z",
-      "window_end": "2026-04-28T12:05:00Z",
-      "route_id": "4",
-      "stop_id": null,
-      "on_time_pct": 0.87,
-      "delay_p50_seconds": 28.0,
-      "delay_p95_seconds": 162.5,
-      "sample_count": 214
-    }
-  ]
-}
-```
+Follow the same GitHub Actions setup from Approach 1 — Step 13.
 
 ---
 
@@ -829,11 +639,7 @@ Query windowed reliability metrics from Postgres.
 |---|---|
 | Redpanda Console (VM) | http://\<hetzner-ip\>:8082 |
 | Spark Master UI | http://localhost:8081 |
-| FastAPI | http://localhost:8000 |
-| FastAPI docs | http://localhost:8000/docs |
-| Grafana | http://localhost:3000 |
-| Postgres | localhost:5432 |
-| Prefect Cloud | https://app.prefect.cloud |
+| Spark Application UI | http://localhost:4040 |
 
 ---
 
@@ -843,11 +649,11 @@ Query windowed reliability metrics from Postgres.
 |---|---|---|
 | Kafka serialization | JSON | No schema registry needed; native `from_json()` in Spark |
 | Kafka broker | Redpanda | Kafka-compatible, no ZooKeeper, single Docker image |
-| Static schedule join | Broadcast CSV at Spark job start | Simple; ~500K rows fits in memory |
-| Two streaming queries | Separate `checkpointLocation` each | Prevents checkpoint corruption on restart |
-| Postgres upsert | `ON CONFLICT DO UPDATE` | Replay-safe — reprocessing a window never duplicates |
-| Cold-path writer | Spark native `writeStream.format("parquet")` | pandas BytesIO pattern doesn't work in streaming |
-| Orchestration | Prefect Cloud | No containers needed — hosted scheduler, worker runs on Hetzner VM |
+| No aggregation in Spark | Raw events only | All analysis done in Snowflake SQL — flexible, no reprocessing needed |
+| Single checkpoint | Cold path only | No hot path means no dual checkpoint complexity |
+| Cold-path writer | Spark native `writeStream.format("parquet")` | Efficient columnar format, partitioned by date for Snowflake loading |
+| Orchestration | GitHub Actions | Free, no containers, pulls code from GitHub, runs in cloud |
+| Deduplication | `DISTINCT` in Snowflake | Handles rare at-least-once reprocessing without complex upsert logic |
 
 ---
 
@@ -857,6 +663,6 @@ Query windowed reliability metrics from Postgres.
 pytest tests/ -v
 ```
 
-Tests cover: metric calculations, Spark schema validation, producer protobuf parsing, Postgres writer idempotency, FastAPI endpoint contracts.
+Tests cover: Spark schema validation, producer protobuf parsing.
 
 ---
