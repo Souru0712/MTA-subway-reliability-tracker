@@ -48,15 +48,15 @@ class Config:
         default_factory=lambda: os.environ["SPARK_CHECKPOINT_BASE"]
     )
 
-    # Snowflake
+    # Snowflake — optional; only required by the GitHub Actions loader, not Spark
     snowflake_account: str = field(
-        default_factory=lambda: os.environ["SNOWFLAKE_ACCOUNT"]
+        default_factory=lambda: os.getenv("SNOWFLAKE_ACCOUNT", "")
     )
     snowflake_user: str = field(
-        default_factory=lambda: os.environ["SNOWFLAKE_USER"]
+        default_factory=lambda: os.getenv("SNOWFLAKE_USER", "")
     )
     snowflake_password: str = field(
-        default_factory=lambda: os.environ["SNOWFLAKE_PASSWORD"]
+        default_factory=lambda: os.getenv("SNOWFLAKE_PASSWORD", "")
     )
     snowflake_warehouse: str = field(
         default_factory=lambda: os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
