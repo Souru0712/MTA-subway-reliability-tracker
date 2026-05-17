@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from google.transit import gtfs_realtime_pb2
 
-from src.ingestion.gtfs_producer import _feed_id, _parse_trip_updates, _parse_vehicle_positions
+from src.ingestion.gtfs_producer import _feed_id, _parse_alerts, _parse_trip_updates, _parse_vehicle_positions
 
 
 def _make_trip_feed(route_id: str, stop_id: str, delay: int) -> gtfs_realtime_pb2.FeedMessage:
@@ -131,6 +131,96 @@ def test_parse_vehicle_positions_produces_correct_shape():
     assert msg["longitude"] == pytest.approx(-74.0060, abs=0.001)
     assert "current_status" in msg
     assert "event_time" in msg
+
+
+def _make_alert_feed(route_id: str, effect: str = "SIGNIFICANT_DELAYS") -> gtfs_realtime_pb2.FeedMessage:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    entity = feed.entity.add()
+    entity.id = "alert-001"
+    alert = entity.alert
+    alert.cause = gtfs_realtime_pb2.Alert.Cause.TECHNICAL_PROBLEM
+    alert.effect = gtfs_realtime_pb2.Alert.Effect.Value(effect)
+    alert.header_text.translation.add().text = "Delays on line"
+    period = alert.active_period.add()
+    period.start = 1745836800
+    period.end = 1745840400
+    ie = alert.informed_entity.add()
+    ie.route_id = route_id
+    return feed
+
+
+def test_parse_alerts_produces_correct_shape():
+    feed = _make_alert_feed("A")
+    produced = []
+
+    mock_producer = MagicMock()
+    mock_producer.produce.side_effect = lambda topic, key, value, callback: produced.append(
+        json.loads(value)
+    )
+
+    count = _parse_alerts(feed, "gtfs", mock_producer, "mta.alerts")
+
+    assert count == 1
+    msg = produced[0]
+    assert msg["alert_id"] == "alert-001"
+    assert msg["route_id"] == "A"
+    assert msg["cause"] == "TECHNICAL_PROBLEM"
+    assert msg["effect"] == "SIGNIFICANT_DELAYS"
+    assert msg["header"] == "Delays on line"
+    assert msg["active_period_start"] == 1745836800
+    assert msg["active_period_end"] == 1745840400
+    assert "event_time" in msg
+
+
+def test_parse_alerts_flattens_multiple_informed_entities():
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    entity = feed.entity.add()
+    entity.id = "alert-002"
+    alert = entity.alert
+    alert.cause = gtfs_realtime_pb2.Alert.Cause.UNKNOWN_CAUSE
+    alert.effect = gtfs_realtime_pb2.Alert.Effect.DETOUR
+    for route in ["A", "C", "E"]:
+        ie = alert.informed_entity.add()
+        ie.route_id = route
+
+    mock_producer = MagicMock()
+    count = _parse_alerts(feed, "gtfs", mock_producer, "mta.alerts")
+    assert count == 3
+    assert mock_producer.produce.call_count == 3
+
+
+def test_parse_alerts_empty_feed():
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+
+    mock_producer = MagicMock()
+    count = _parse_alerts(feed, "gtfs", mock_producer, "mta.alerts")
+    assert count == 0
+    mock_producer.produce.assert_not_called()
+
+
+def test_parse_alerts_no_header_text():
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    entity = feed.entity.add()
+    entity.id = "alert-003"
+    alert = entity.alert
+    alert.cause = gtfs_realtime_pb2.Alert.Cause.UNKNOWN_CAUSE
+    alert.effect = gtfs_realtime_pb2.Alert.Effect.OTHER_EFFECT
+    ie = alert.informed_entity.add()
+    ie.route_id = "G"
+
+    produced = []
+    mock_producer = MagicMock()
+    mock_producer.produce.side_effect = lambda topic, key, value, callback: produced.append(
+        json.loads(value)
+    )
+
+    count = _parse_alerts(feed, "gtfs", mock_producer, "mta.alerts")
+    assert count == 1
+    assert produced[0]["header"] is None
 
 
 def test_feed_id_extraction():
