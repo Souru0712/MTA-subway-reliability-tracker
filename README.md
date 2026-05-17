@@ -1,26 +1,22 @@
 # MTA Subway Reliability Tracker
 
-Real-time streaming pipeline that computes per-line and per-station subway reliability metrics from MTA GTFS-RT feeds — giving journalists and commuters flight-delay-style stats for the NYC subway.
+Streaming pipeline that ingests live MTA GTFS-RT feeds, archives every raw event to S3 Parquet, and loads them into Snowflake for historical reliability analysis — giving journalists and commuters flight-delay-style stats for the NYC subway.
 
 ---
 
 ## The Problem
 
-MTA publishes live feeds every 30 seconds, but there is no easy way to query *historical* reliability. There is no equivalent of flight-delay statistics for the subway.
+MTA publishes live feeds every 30 seconds but no historical per-station reliability data exists. There is no equivalent of flight-delay statistics for the subway.
 
 ## The Solution
 
-A streaming pipeline that ingests GTFS-RT every 30s, computes windowed reliability metrics in Spark Structured Streaming, writes hot aggregates to Postgres for live serving, and archives raw events to S3 Parquet for analysis.
+A streaming pipeline that ingests GTFS-RT every 30s, writes every raw event to S3 Parquet partitioned by date, and loads them into Snowflake daily for analysis. All aggregations are done in Snowflake at query time — any resolution, any time window, any grouping.
 
 ---
 
 ## How It Works
 
-MTA publishes GTFS-Realtime feeds every 30 seconds — protobuf snapshots of every active train. The producer polls all 8 feed groups and publishes each stop time update as a JSON message to Redpanda (Kafka). Spark consumes those messages continuously and writes to two places at the same time from the same stream — the hot path and the cold path.
-
-### Hot path vs Cold path
-
-They are not a sequence. They are two simultaneous outputs of the same Spark job, reading from the same parsed events before and after aggregation:
+MTA publishes GTFS-Realtime feeds every 30 seconds — protobuf snapshots of every active train. The producer polls all 8 feed groups and publishes each stop time update as a JSON message to Redpanda (Kafka). Spark consumes those messages and writes every individual event to S3 Parquet — no aggregation, no data loss.
 
 ```
 Kafka message
@@ -28,37 +24,19 @@ Kafka message
      ▼
 parse_events()
      │
-     ├──→ build_aggregates() → Postgres    (hot path)
-     │
-     └──→ raw events → S3 Parquet          (cold path)
+     └──→ raw events → S3 Parquet (dt=YYYY-MM-DD)
 ```
 
-**Hot path** — Spark computes a summary row every 5 minutes per route and writes it to Postgres. Detail is traded for speed. FastAPI and Grafana read from here.
+Each row in S3 is one stop time update:
 
 ```
-window_start         route_id   on_time_pct   delay_p95
-2026-05-13 09:00     4          0.87          162s
-2026-05-13 09:00     A          0.73          310s
+event_time            route_id   stop_id   delay_seconds   trip_id
+2026-05-13 09:00:14   4          640N      120             088950_4
+2026-05-13 09:00:15   4          631N      85              088950_4
+2026-05-13 09:00:18   A          A27N      400             123456_A
 ```
 
-Answers: *Is the 4 train running on time right now? Which line has the worst delay today?*
-
-**Cold path** — Spark writes every individual event to S3 Parquet, partitioned by date, with no aggregation. Nothing is thrown away. Prefect loads these files into Snowflake daily.
-
-```
-event_time            route_id   stop_id   delay_seconds
-2026-05-13 09:00:14   4          640N      120
-2026-05-13 09:00:15   4          631N      85
-2026-05-13 09:00:18   A          A27N      400
-```
-
-Answers: *What is the average delay at Times Square on weekday mornings? Does the A train get worse after rain? Which stop causes the most cascading delays?*
-
-The hot path gives you fast pre-computed answers for monitoring. The cold path keeps everything so you can ask questions you didn't think of when you built the pipeline.
-
-### Why Prefect reads S3 and not Postgres
-
-Prefect loads raw events from S3 into Snowflake — not the aggregated metrics from Postgres. Snowflake gets the original unaggregated data so you can recompute any metric, at any granularity, using SQL on months of history. If the 5-minute window in Spark turns out to be the wrong resolution, the raw data in Snowflake lets you recompute at 1-minute or 1-hour without re-running the pipeline.
+GitHub Actions loads these files into Snowflake daily. All analysis — reliability percentages, delay percentiles, trend analysis — is done in Snowflake SQL on the raw events.
 
 ---
 
@@ -76,18 +54,14 @@ Kafka (Redpanda)
         │
         ▼
 Spark Structured Streaming
-  watermark: 2 min  |  window: 5 min tumbling
-  agg: on_time_pct, delay_p50, delay_p95 per line + station
+  parse → S3 Parquet (raw/dt=YYYY-MM-DD/)
         │
-   ┌────┴────────────┐
-   ▼ HOT             ▼ COLD
-Postgres           S3 Parquet
-reliability_metrics   raw/dt=YYYY-MM-DD/
-   │
-   ├── FastAPI  GET /reliability?line=4&window=1d
-   └── Grafana  live dashboard
-
-S3 Parquet  →  (Prefect, daily 3 AM)  →  Snowflake RAW.MTA_EVENTS
+        ▼ (GitHub Actions, daily 3 AM)
+Snowflake RAW.MTA_EVENTS
+        │
+        ▼
+SQL aggregations at query time
+  on_time_pct, delay_p50, delay_p95, trend analysis
 ```
 
 ---
@@ -96,16 +70,15 @@ S3 Parquet  →  (Prefect, daily 3 AM)  →  Snowflake RAW.MTA_EVENTS
 
 | Layer | Technology |
 |---|---|
+| Layer | Technology |
+|---|---|
 | Language | Python 3.11 |
 | Ingest | MTA GTFS-Realtime API, Python `gtfs-realtime-bindings` |
 | Broker | Redpanda (Kafka-compatible, no ZooKeeper) |
 | Stream processing | PySpark 3.5 Structured Streaming (`apache/spark:3.5.0`) |
-| Hot store | Postgres 15 |
-| Cold store | S3 Parquet (partitioned by `dt=YYYY-MM-DD`) |
-| Long-term store | Snowflake |
-| Serving | FastAPI + asyncpg |
-| Dashboard | Grafana 10 (auto-provisioned over Postgres) |
-| Orchestration | Prefect 3 (daily S3 → Snowflake compaction, hosted scheduler) |
+| Storage | S3 Parquet (partitioned by `dt=YYYY-MM-DD`) |
+| Data warehouse | Snowflake |
+| Orchestration | GitHub Actions (daily S3 → Snowflake compaction) |
 | Container | Docker Compose |
 
 ---
@@ -120,23 +93,18 @@ S3 Parquet  →  (Prefect, daily 3 AM)  →  Snowflake RAW.MTA_EVENTS
 │   │   └── static_schedule.py  # Downloads gtfs_static.zip → S3 CSV
 │   ├── transform/
 │   │   ├── schemas.py          # PySpark StructType per Kafka topic
-│   │   ├── spark_streaming.py  # Main streaming job (hot + cold paths)
-│   │   └── metrics.py          # Pure functions: on_time_pct, percentile
+│   │   └── spark_streaming.py  # Streaming job: Kafka → S3 Parquet (raw events)
 │   └── load/
-│       ├── postgres_writer.py  # foreachBatch upsert → reliability_metrics
 │       └── snowflake_loader.py # COPY INTO RAW.MTA_EVENTS from S3
-├── api/
-│   ├── main.py                 # FastAPI app + GET /reliability
-│   ├── db.py                   # asyncpg pool + window param parsing
-│   └── models.py               # Pydantic response models
-├── flows/
-│   └── mta_s3_to_snowflake.py      # Prefect flow: daily S3 → Snowflake compaction
-├── prefect.yaml                     # Prefect deployment config (schedule + worker pool)
+├── .github/
+│   ├── workflows/
+│   │   └── daily_snowflake_load.yml  # Daily S3 → Snowflake compaction
+│   └── scripts/
+│       └── run_snowflake_load.py     # Snowflake load entrypoint
 ├── infra/
-│   ├── postgres/init.sql       # DDL for reliability_metrics table
-│   ├── grafana/provisioning/   # Auto-provisioned datasource + dashboard
-│   └── docker/                 # Dockerfiles for producer + API
-└── tests/                      # pytest suite (metrics, schemas, API, writer)
+│   ├── redpanda/               # Redpanda console config
+│   └── docker/                 # Dockerfiles for producer + Spark
+└── tests/                      # pytest suite (schemas, producer)
 ```
 
 ---
@@ -575,6 +543,12 @@ INFO src.load.postgres_writer batch_id=11 upserted 1328 rows to reliability_metr
 ```bash
 docker exec -it postgres psql -U mta -d mta -c "SELECT COUNT(*) FROM reliability_metrics;"
 # Expect: count > 0
+
+docker exec -it postgres psql -U mta -d mta -c "
+SELECT window_start, window_end, route_id, on_time_pct, sample_count 
+FROM reliability_metrics 
+ORDER BY window_start DESC 
+LIMIT 5;"
 ```
 
 ---

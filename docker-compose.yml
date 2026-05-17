@@ -42,24 +42,6 @@ services:
       redpanda:
         condition: service_healthy
 
-  # ── Postgres ────────────────────────────────────────────────────────────────
-  postgres:
-    image: postgres:15
-    container_name: postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ── Spark ───────────────────────────────────────────────────────────────────
   spark-master:
     build:
@@ -76,8 +58,6 @@ services:
       - ./config:/opt/spark/work/config
     env_file:
       - .env
-    environment:
-      POSTGRES_MTA_DSN: postgresql://mta:mta@postgres:5432/mta
 
   spark-worker:
     build:
@@ -86,8 +66,8 @@ services:
     container_name: spark-worker
     entrypoint: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     environment:
-      SPARK_WORKER_MEMORY: 2g
-      SPARK_WORKER_CORES: "2"
+      SPARK_WORKER_MEMORY: 1g
+      SPARK_WORKER_CORES: "1"
     depends_on:
       - spark-master
     volumes:
@@ -111,40 +91,5 @@ services:
         condition: service_healthy
     restart: on-failure
 
-  # ── FastAPI ─────────────────────────────────────────────────────────────────
-  fastapi:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.api
-    container_name: fastapi
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      POSTGRES_MTA_DSN: postgresql://mta:mta@postgres:5432/mta
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: on-failure
-
-  # ── Grafana ─────────────────────────────────────────────────────────────────
-  grafana:
-    image: grafana/grafana:10.3.3
-    container_name: grafana
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-
 volumes:
   redpanda-data:
-  postgres-data:
-  grafana-data:

@@ -31,11 +31,6 @@ class Config:
         default_factory=lambda: os.getenv("KAFKA_TOPIC_ALERTS", "mta.alerts")
     )
 
-    # Postgres
-    postgres_mta_dsn: str = field(
-        default_factory=lambda: os.environ["POSTGRES_MTA_DSN"]
-    )
-
     # S3 / AWS
     aws_access_key_id: str = field(
         default_factory=lambda: os.environ["AWS_ACCESS_KEY_ID"]
