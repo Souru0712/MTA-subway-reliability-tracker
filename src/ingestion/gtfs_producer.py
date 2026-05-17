@@ -110,6 +110,50 @@ def _parse_vehicle_positions(
     return count
 
 
+def _parse_alerts(
+    feed: gtfs_realtime_pb2.FeedMessage,
+    feed_id: str,
+    producer: Producer,
+    topic: str,
+) -> int:
+    count = 0
+    event_time = datetime.now(timezone.utc).isoformat()
+
+    for entity in feed.entity:
+        if not entity.HasField("alert"):
+            continue
+        alert = entity.alert
+        cause = gtfs_realtime_pb2.Alert.Cause.Name(alert.cause)
+        effect = gtfs_realtime_pb2.Alert.Effect.Name(alert.effect)
+        header = alert.header_text.translation[0].text if alert.header_text.translation else None
+        active_start = alert.active_period[0].start if alert.active_period else None
+        active_end = alert.active_period[0].end if alert.active_period else None
+
+        # flatten by informed entity — one row per affected route/stop
+        for ie in alert.informed_entity:
+            msg = {
+                "event_time": event_time,
+                "feed_id": feed_id,
+                "alert_id": entity.id,
+                "route_id": ie.route_id or None,
+                "stop_id": ie.stop_id or None,
+                "cause": cause,
+                "effect": effect,
+                "header": header,
+                "active_period_start": active_start,
+                "active_period_end": active_end,
+            }
+            producer.produce(
+                topic,
+                key=entity.id,
+                value=json.dumps(msg),
+                callback=_delivery_report,
+            )
+            count += 1
+
+    return count
+
+
 def run(cfg: Config) -> None:
     producer = _build_producer(cfg)
     logger.info(
@@ -129,9 +173,13 @@ def run(cfg: Config) -> None:
             vp_count = _parse_vehicle_positions(
                 feed, fid, producer, cfg.kafka_topic_vehicle_positions
             )
+            al_count = _parse_alerts(
+                feed, fid, producer, cfg.kafka_topic_alerts
+            )
             producer.flush()
             logger.info(
-                "feed=%s trip_updates=%d vehicle_positions=%d", fid, tu_count, vp_count
+                "feed=%s trip_updates=%d vehicle_positions=%d alerts=%d",
+                fid, tu_count, vp_count, al_count,
             )
 
         time.sleep(30)

@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 load_dotenv()
 
 from config.settings import Config
-from src.transform.schemas import TRIP_UPDATE_SCHEMA, VEHICLE_POSITION_SCHEMA
+from src.transform.schemas import ALERTS_SCHEMA, TRIP_UPDATE_SCHEMA, VEHICLE_POSITION_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,19 @@ def run(cfg: Config) -> None:
         .start()
     )
 
-    logger.info("Streaming queries started — trip_updates and vehicle_positions → S3.")
+    al_df = parse_events(
+        read_kafka_stream(spark, cfg.kafka_bootstrap_servers, cfg.kafka_topic_alerts),
+        ALERTS_SCHEMA,
+    )
+    al_query = (
+        al_df.writeStream
+        .foreachBatch(make_s3_writer(f"s3a://{cfg.s3_bucket}/raw/alerts/", "alerts"))
+        .option("checkpointLocation", cfg.spark_checkpoint_base + "/cold/alerts")
+        .outputMode("append")
+        .start()
+    )
+
+    logger.info("Streaming queries started — trip_updates, vehicle_positions, alerts → S3.")
     spark.streams.awaitAnyTermination()
 
 

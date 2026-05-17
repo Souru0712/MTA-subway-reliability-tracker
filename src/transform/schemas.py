@@ -4,7 +4,6 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
-    TimestampType,
 )
 
 # Schema for mta.trip_updates messages
@@ -33,5 +32,21 @@ VEHICLE_POSITION_SCHEMA = StructType(
         StructField("latitude", DoubleType(), True),
         StructField("longitude", DoubleType(), True),
         StructField("timestamp", LongType(), True),
+    ]
+)
+
+# Schema for mta.alerts messages
+ALERTS_SCHEMA = StructType(
+    [
+        StructField("event_time", StringType(), True),
+        StructField("feed_id", StringType(), True),
+        StructField("alert_id", StringType(), True),
+        StructField("route_id", StringType(), True),
+        StructField("stop_id", StringType(), True),
+        StructField("cause", StringType(), True),
+        StructField("effect", StringType(), True),
+        StructField("header", StringType(), True),
+        StructField("active_period_start", LongType(), True),
+        StructField("active_period_end", LongType(), True),
     ]
 )
