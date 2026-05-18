@@ -9,7 +9,7 @@ import sys
 import snowflake.connector
 
 _CREATE_STAGE_SQL = """
-CREATE STAGE IF NOT EXISTS RAW.S3_STATIC_STAGE
+CREATE OR REPLACE STAGE RAW.S3_STATIC_STAGE
     URL = 's3://{bucket}/static/'
     CREDENTIALS = (
         AWS_KEY_ID     = '{key_id}'
