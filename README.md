@@ -42,26 +42,39 @@ GitHub Actions loads these files into Snowflake daily. All analysis — reliabil
 
 ## Architecture
 
-```
-MTA GTFS-RT feeds (HTTP/protobuf, every 30s)
-        │
-        ▼
-gtfs_producer.py   →   JSON messages
-        │
-        ▼
-Kafka (Redpanda)
-  mta.trip_updates | mta.vehicle_positions | mta.alerts
-        │
-        ▼
-Spark Structured Streaming
-  parse → S3 Parquet (raw/dt=YYYY-MM-DD/)
-        │
-        ▼ (GitHub Actions, daily 3 AM)
-Snowflake RAW.MTA_EVENTS
-        │
-        ▼
-SQL aggregations at query time
-  on_time_pct, delay_p50, delay_p95, trend analysis
+```mermaid
+flowchart TD
+    MTA["🚇 MTA GTFS-RT API\nHTTP/protobuf · 8 feed groups · every 30s"]
+
+    subgraph VM["Hetzner VM (CPX11)"]
+        PROD["gtfs_producer.py\nPolls feeds · parses protobuf · emits JSON"]
+        RP["Redpanda (Kafka)\nmta.trip_updates\nmta.vehicle_positions\nmta.alerts"]
+    end
+
+    subgraph LOCAL["Laptop (run periodically)"]
+        SPARK["Spark Structured Streaming\nparse_events · foreachBatch · no aggregation"]
+    end
+
+    subgraph STORAGE["AWS S3"]
+        S3["s3://mta-reliability-tracker/raw/\n├── trip_updates/dt=YYYY-MM-DD/\n├── vehicle_positions/dt=YYYY-MM-DD/\n└── alerts/dt=YYYY-MM-DD/"]
+    end
+
+    subgraph CI["GitHub Actions (daily 3 AM UTC)"]
+        GHA["run_snowflake_load.py\nCOPY INTO · all 3 topics"]
+    end
+
+    subgraph DW["Snowflake"]
+        SF["RAW.TRIP_UPDATES\nRAW.VEHICLE_POSITIONS\nRAW.ALERTS"]
+        SQL["SQL analytics at query time\ndelay percentiles · trend analysis\nrush hour · worst stations"]
+    end
+
+    MTA --> PROD
+    PROD --> RP
+    RP -->|"Kafka consumer\nmaxOffsetsPerTrigger=50000"| SPARK
+    SPARK -->|"Parquet · partitioned by dt"| S3
+    S3 -->|"partition_exists check"| GHA
+    GHA --> SF
+    SF --> SQL
 ```
 
 ---
@@ -93,7 +106,7 @@ SQL aggregations at query time
 │   │   ├── schemas.py          # PySpark StructType per Kafka topic
 │   │   └── spark_streaming.py  # Streaming job: Kafka → S3 Parquet (raw events)
 │   └── load/
-│       └── snowflake_loader.py # COPY INTO RAW.MTA_EVENTS from S3
+│       └── snowflake_loader.py # COPY INTO RAW.TRIP_UPDATES / VEHICLE_POSITIONS / ALERTS
 ├── .github/
 │   ├── workflows/
 │   │   └── daily_snowflake_load.yml  # Daily S3 → Snowflake compaction
