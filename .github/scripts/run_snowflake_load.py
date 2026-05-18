@@ -57,9 +57,9 @@ def main() -> None:
                 continue
             rows = copy_from_s3(conn, topic, stage_prefix, cfg)
             if rows == 0:
-                print(f"WARNING: COPY INTO loaded 0 rows from {prefix}")
+                print(f"WARNING: COPY INTO loaded 0 rows from {s3_check_prefix}")
             else:
-                print(f"Loaded {rows} rows from {prefix}")
+                print(f"Loaded {rows} rows from {s3_check_prefix}")
                 any_loaded = True
 
         if not any_loaded:
