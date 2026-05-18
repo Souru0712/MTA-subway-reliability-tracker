@@ -50,11 +50,12 @@ def main() -> None:
 
         any_loaded = False
         for topic in TOPICS:
-            prefix = f"{topic}/dt={ds}/"
-            if not partition_exists(bucket, prefix):
-                print(f"No S3 objects at s3://{bucket}/{prefix} — skipping.")
+            s3_check_prefix = f"raw/{topic}/dt={ds}/"   # full path from bucket root
+            stage_prefix = f"{topic}/dt={ds}/"           # relative to stage URL (s3://bucket/raw/)
+            if not partition_exists(bucket, s3_check_prefix):
+                print(f"No S3 objects at s3://{bucket}/{s3_check_prefix} — skipping.")
                 continue
-            rows = copy_from_s3(conn, topic, prefix, cfg)
+            rows = copy_from_s3(conn, topic, stage_prefix, cfg)
             if rows == 0:
                 print(f"WARNING: COPY INTO loaded 0 rows from {prefix}")
             else:
