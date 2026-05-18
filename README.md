@@ -44,21 +44,14 @@ GitHub Actions loads these files into Snowflake daily. All analysis — reliabil
 
 ```mermaid
 flowchart TD
-    MTA["MTA GTFS-RT API\nprotobuf · 8 feeds · every 30s"]
-
+    MTA["MTA GTFS-RT API\n8 feeds · every 30s"]
     PROD["gtfs_producer.py\nHetzner VM"]
-
-    RP["Redpanda\nmta.trip_updates\nmta.vehicle_positions\nmta.alerts"]
-
-    SPARK["Spark Structured Streaming\nLaptop · parse only · no aggregation"]
-
-    S3["AWS S3\nraw/trip_updates/dt=YYYY-MM-DD\nraw/vehicle_positions/dt=YYYY-MM-DD\nraw/alerts/dt=YYYY-MM-DD"]
-
-    GHA["GitHub Actions\nDaily 3 AM UTC\nCOPY INTO Snowflake"]
-
+    RP["Redpanda\ntrip_updates · vehicle_positions · alerts"]
+    SPARK["Spark Streaming\nparse · write to S3"]
+    S3["AWS S3\nParquet · dt=YYYY-MM-DD"]
+    GHA["GitHub Actions\ndaily 3 AM UTC"]
     SF["Snowflake\nRAW.TRIP_UPDATES\nRAW.VEHICLE_POSITIONS\nRAW.ALERTS"]
-
-    SQL["SQL Analytics\nDelay percentiles · Rush hour · Worst stations"]
+    SQL["SQL Analytics"]
 
     MTA --> PROD
     PROD --> RP
