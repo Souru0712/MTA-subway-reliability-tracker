@@ -43,38 +43,17 @@ GitHub Actions loads these files into Snowflake daily. All analysis — reliabil
 ## Architecture
 
 ```mermaid
-flowchart TD
-    MTA["🚇 MTA GTFS-RT API\nHTTP/protobuf · 8 feed groups · every 30s"]
+flowchart LR
+    MTA["MTA GTFS-RT API\nprotobuf · every 30s"]
+    PROD["gtfs_producer.py\nHetzner VM"]
+    RP["Redpanda\nmta.trip_updates\nmta.vehicle_positions\nmta.alerts"]
+    SPARK["Spark Streaming\nLaptop"]
+    S3["S3 Parquet\nraw/topic/dt=YYYY-MM-DD"]
+    GHA["GitHub Actions\ndaily 3 AM UTC"]
+    SF["Snowflake\nRAW.TRIP_UPDATES\nRAW.VEHICLE_POSITIONS\nRAW.ALERTS"]
+    SQL["SQL Analytics\ndelay · trends · stations"]
 
-    subgraph VM["Hetzner VM (CPX11)"]
-        PROD["gtfs_producer.py\nPolls feeds · parses protobuf · emits JSON"]
-        RP["Redpanda (Kafka)\nmta.trip_updates\nmta.vehicle_positions\nmta.alerts"]
-    end
-
-    subgraph LOCAL["Laptop (run periodically)"]
-        SPARK["Spark Structured Streaming\nparse_events · foreachBatch · no aggregation"]
-    end
-
-    subgraph STORAGE["AWS S3"]
-        S3["s3://mta-reliability-tracker/raw/\n├── trip_updates/dt=YYYY-MM-DD/\n├── vehicle_positions/dt=YYYY-MM-DD/\n└── alerts/dt=YYYY-MM-DD/"]
-    end
-
-    subgraph CI["GitHub Actions (daily 3 AM UTC)"]
-        GHA["run_snowflake_load.py\nCOPY INTO · all 3 topics"]
-    end
-
-    subgraph DW["Snowflake"]
-        SF["RAW.TRIP_UPDATES\nRAW.VEHICLE_POSITIONS\nRAW.ALERTS"]
-        SQL["SQL analytics at query time\ndelay percentiles · trend analysis\nrush hour · worst stations"]
-    end
-
-    MTA --> PROD
-    PROD --> RP
-    RP -->|"Kafka consumer\nmaxOffsetsPerTrigger=50000"| SPARK
-    SPARK -->|"Parquet · partitioned by dt"| S3
-    S3 -->|"partition_exists check"| GHA
-    GHA --> SF
-    SF --> SQL
+    MTA --> PROD --> RP --> SPARK --> S3 --> GHA --> SF --> SQL
 ```
 
 ---
