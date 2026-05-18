@@ -43,17 +43,30 @@ GitHub Actions loads these files into Snowflake daily. All analysis — reliabil
 ## Architecture
 
 ```mermaid
-flowchart LR
-    MTA["MTA GTFS-RT API\nprotobuf · every 30s"]
-    PROD["gtfs_producer.py\nHetzner VM"]
-    RP["Redpanda\nmta.trip_updates\nmta.vehicle_positions\nmta.alerts"]
-    SPARK["Spark Streaming\nLaptop"]
-    S3["S3 Parquet\nraw/topic/dt=YYYY-MM-DD"]
-    GHA["GitHub Actions\ndaily 3 AM UTC"]
-    SF["Snowflake\nRAW.TRIP_UPDATES\nRAW.VEHICLE_POSITIONS\nRAW.ALERTS"]
-    SQL["SQL Analytics\ndelay · trends · stations"]
+flowchart TD
+    MTA["MTA GTFS-RT API\nprotobuf · 8 feeds · every 30s"]
 
-    MTA --> PROD --> RP --> SPARK --> S3 --> GHA --> SF --> SQL
+    PROD["gtfs_producer.py\nHetzner VM"]
+
+    RP["Redpanda\nmta.trip_updates\nmta.vehicle_positions\nmta.alerts"]
+
+    SPARK["Spark Structured Streaming\nLaptop · parse only · no aggregation"]
+
+    S3["AWS S3\nraw/trip_updates/dt=YYYY-MM-DD\nraw/vehicle_positions/dt=YYYY-MM-DD\nraw/alerts/dt=YYYY-MM-DD"]
+
+    GHA["GitHub Actions\nDaily 3 AM UTC\nCOPY INTO Snowflake"]
+
+    SF["Snowflake\nRAW.TRIP_UPDATES\nRAW.VEHICLE_POSITIONS\nRAW.ALERTS"]
+
+    SQL["SQL Analytics\nDelay percentiles · Rush hour · Worst stations"]
+
+    MTA --> PROD
+    PROD --> RP
+    RP --> SPARK
+    SPARK --> S3
+    S3 --> GHA
+    GHA --> SF
+    SF --> SQL
 ```
 
 ---
