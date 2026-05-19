@@ -100,8 +100,29 @@ flowchart TD
 ├── infra/
 │   ├── redpanda/               # Redpanda console config
 │   └── docker/                 # Dockerfiles for producer + Spark
+├── .github/
+│   ├── workflows/
+│   │   ├── daily_snowflake_load.yml   # Daily S3 → Snowflake compaction
+│   │   └── load_static_schedule.yml   # Manual: load stop_times_flat.csv → Snowflake
+│   └── scripts/
+│       ├── run_snowflake_load.py      # Daily load entrypoint
+│       └── load_static_schedule.py   # Static schedule load entrypoint
 └── tests/                      # pytest suite (schemas, producer)
 ```
+
+### Static Schedule
+
+The static GTFS zip (`stop_times_flat.csv`) is uploaded to S3 once manually and loaded into `RAW.STOP_TIMES_FLAT` via GitHub Actions:
+
+```bash
+# 1. Upload to S3
+python -m src.ingestion.static_schedule
+
+# 2. Load into Snowflake
+# GitHub Actions → Load Static Schedule to Snowflake → Run workflow
+```
+
+MTA updates the static schedule roughly **every 1-3 months** around service changes (September, January, June). Re-run both steps after any MTA service change announcement to keep `RAW.STOP_TIMES_FLAT` current.
 
 ---
 
@@ -181,7 +202,6 @@ Skip if you already have `~/.ssh/id_ed25519.pub`.
 # Mac / Linux / Windows Git Bash
 ssh-keygen -t ed25519 -C "your-email"
 # Press Enter to accept all defaults
-
 cat ~/.ssh/id_ed25519.pub   # copy this — paste it into Hetzner
 ```
 
