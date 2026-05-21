@@ -1,7 +1,12 @@
 """
 GitHub Actions entrypoint for daily S3 → Snowflake load.
-Reads DS from environment (set by workflow_dispatch input or defaults to yesterday).
-Loads trip_updates, vehicle_positions, and alerts partitions for the given date.
+
+Default mode: rolling 7-day window — attempts every day from today-7 to yesterday.
+COPY INTO is file-level idempotent (Snowflake load history), so days already loaded
+are skipped automatically. Missed Spark runs self-heal on the next cron execution
+as long as the gap is within the 7-day Kafka retention window.
+
+Override: set DS env var to a specific date (YYYY-MM-DD) to load a single day only.
 """
 import os
 import sys
@@ -16,6 +21,7 @@ from src.load.snowflake_loader import copy_from_s3, ensure_tables, get_connectio
 
 TOPICS = ["trip_updates", "vehicle_positions", "alerts"]
 QUARANTINE_TOPICS = ["quarantine_trip_updates", "quarantine_vehicle_positions", "quarantine_alerts"]
+ROLLING_WINDOW_DAYS = 7   # matches Kafka retention — no point scanning beyond this
 
 
 @dataclass
@@ -35,46 +41,67 @@ def partition_exists(bucket: str, prefix: str) -> bool:
     return resp.get("KeyCount", 0) > 0
 
 
+def dates_to_load() -> list[str]:
+    """Return list of dates to attempt. Single date if DS is set, else rolling window."""
+    ds = os.environ.get("DS")
+    if ds:
+        return [ds]
+    today = datetime.now(timezone.utc).date()
+    return [
+        (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        for i in range(1, ROLLING_WINDOW_DAYS + 1)  # yesterday back to today-7
+    ]
+
+
+def load_date(conn, bucket: str, cfg: SnowflakeConfig, ds: str) -> bool:
+    """Load all topics for a single date. Returns True if any rows were loaded."""
+    any_loaded = False
+
+    for topic in TOPICS:
+        s3_check_prefix = f"raw/{topic}/dt={ds}/"
+        stage_prefix = f"{topic}/dt={ds}/"
+        if not partition_exists(bucket, s3_check_prefix):
+            continue
+        rows = copy_from_s3(conn, topic, stage_prefix, cfg)
+        if rows == 0:
+            print(f"  {topic} dt={ds}: already loaded or empty")
+        else:
+            print(f"  {topic} dt={ds}: loaded {rows} rows")
+            any_loaded = True
+
+    for topic in QUARANTINE_TOPICS:
+        s3_check_prefix = f"raw/{topic}/dt={ds}/"
+        stage_prefix = f"{topic}/dt={ds}/"
+        if not partition_exists(bucket, s3_check_prefix):
+            continue
+        rows = copy_from_s3(conn, topic, stage_prefix, cfg)
+        if rows > 0:
+            print(f"  quarantine {topic} dt={ds}: loaded {rows} rows")
+
+    return any_loaded
+
+
 def main() -> None:
-    ds = os.environ.get("DS") or (
-        datetime.now(timezone.utc) - timedelta(days=1)
-    ).strftime("%Y-%m-%d")
-
-    print(f"Loading S3 partitions for dt={ds}")
-
+    dates = dates_to_load()
     bucket = os.environ["S3_BUCKET"]
     cfg = SnowflakeConfig()
     conn = get_connection(cfg)
 
+    print(f"Rolling window: checking {len(dates)} date(s): {dates[0]} → {dates[-1]}")
+
     try:
         ensure_tables(conn)
 
-        any_loaded = False
-        for topic in TOPICS:
-            s3_check_prefix = f"raw/{topic}/dt={ds}/"   # full path from bucket root
-            stage_prefix = f"{topic}/dt={ds}/"           # relative to stage URL (s3://bucket/raw/)
-            if not partition_exists(bucket, s3_check_prefix):
-                print(f"No S3 objects at s3://{bucket}/{s3_check_prefix} — skipping.")
-                continue
-            rows = copy_from_s3(conn, topic, stage_prefix, cfg)
-            if rows == 0:
-                print(f"WARNING: COPY INTO loaded 0 rows from {s3_check_prefix}")
-            else:
-                print(f"Loaded {rows} rows from {s3_check_prefix}")
-                any_loaded = True
+        total_loaded = 0
+        for ds in dates:
+            if load_date(conn, bucket, cfg, ds):
+                total_loaded += 1
 
-        # quarantine topics — load if present, never fail job if absent
-        for topic in QUARANTINE_TOPICS:
-            s3_check_prefix = f"raw/{topic}/dt={ds}/"
-            stage_prefix = f"{topic}/dt={ds}/"
-            if not partition_exists(bucket, s3_check_prefix):
-                continue
-            rows = copy_from_s3(conn, topic, stage_prefix, cfg)
-            print(f"Quarantine {topic}: loaded {rows} rows from {s3_check_prefix}")
-
-        if not any_loaded:
-            print("No data loaded for any topic — check S3 and Spark job.")
+        if total_loaded == 0:
+            print("No new data loaded across all dates — Spark may not have run recently.")
             sys.exit(1)
+
+        print(f"Done. Loaded new data for {total_loaded}/{len(dates)} date(s).")
 
     finally:
         conn.close()
