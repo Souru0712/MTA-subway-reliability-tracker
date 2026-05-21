@@ -34,4 +34,7 @@ select
 
 from base
 group by 1, 2, 3, 4
+having count(*) >= 30   -- suppress single-train noise (e.g. a 1-arrival bucket
+                        -- whose lone weird trip becomes "the median"). 30 is a
+                        -- pragmatic floor; thin buckets are excluded, not hidden.
 order by week, route_id, day_type, time_period
