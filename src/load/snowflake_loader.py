@@ -54,6 +54,58 @@ CREATE TABLE IF NOT EXISTS RAW.ALERTS (
 )
 """
 
+# quarantine tables mirror raw schema + rejection_reason + ingested_at
+_CREATE_QUARANTINE_TRIP_UPDATES_SQL = """
+CREATE TABLE IF NOT EXISTS RAW.QUARANTINE_TRIP_UPDATES (
+    event_time        TIMESTAMP_NTZ,
+    feed_id           VARCHAR,
+    trip_id           VARCHAR,
+    route_id          VARCHAR,
+    stop_id           VARCHAR,
+    arrival_time      NUMBER,
+    departure_time    NUMBER,
+    delay_seconds     NUMBER,
+    dt                VARCHAR,
+    ingested_at       TIMESTAMP_NTZ,
+    rejection_reason  VARCHAR
+)
+"""
+
+_CREATE_QUARANTINE_VEHICLE_POSITIONS_SQL = """
+CREATE TABLE IF NOT EXISTS RAW.QUARANTINE_VEHICLE_POSITIONS (
+    event_time        TIMESTAMP_NTZ,
+    feed_id           VARCHAR,
+    trip_id           VARCHAR,
+    route_id          VARCHAR,
+    stop_id           VARCHAR,
+    current_status    VARCHAR,
+    latitude          FLOAT,
+    longitude         FLOAT,
+    timestamp         NUMBER,
+    dt                VARCHAR,
+    ingested_at       TIMESTAMP_NTZ,
+    rejection_reason  VARCHAR
+)
+"""
+
+_CREATE_QUARANTINE_ALERTS_SQL = """
+CREATE TABLE IF NOT EXISTS RAW.QUARANTINE_ALERTS (
+    event_time            TIMESTAMP_NTZ,
+    feed_id               VARCHAR,
+    alert_id              VARCHAR,
+    route_id              VARCHAR,
+    stop_id               VARCHAR,
+    cause                 VARCHAR,
+    effect                VARCHAR,
+    header                VARCHAR,
+    active_period_start   NUMBER,
+    active_period_end     NUMBER,
+    dt                    VARCHAR,
+    ingested_at           TIMESTAMP_NTZ,
+    rejection_reason      VARCHAR
+)
+"""
+
 _COPY_SQL = """
 COPY INTO {table}
 FROM @{stage}/{s3_prefix}
@@ -63,15 +115,21 @@ PURGE = FALSE
 """
 
 _TABLES = {
-    "trip_updates": _CREATE_TRIP_UPDATES_SQL,
-    "vehicle_positions": _CREATE_VEHICLE_POSITIONS_SQL,
-    "alerts": _CREATE_ALERTS_SQL,
+    "trip_updates":             _CREATE_TRIP_UPDATES_SQL,
+    "vehicle_positions":        _CREATE_VEHICLE_POSITIONS_SQL,
+    "alerts":                   _CREATE_ALERTS_SQL,
+    "quarantine_trip_updates":  _CREATE_QUARANTINE_TRIP_UPDATES_SQL,
+    "quarantine_vehicle_positions": _CREATE_QUARANTINE_VEHICLE_POSITIONS_SQL,
+    "quarantine_alerts":        _CREATE_QUARANTINE_ALERTS_SQL,
 }
 
 _TABLE_NAMES = {
-    "trip_updates": "RAW.TRIP_UPDATES",
-    "vehicle_positions": "RAW.VEHICLE_POSITIONS",
-    "alerts": "RAW.ALERTS",
+    "trip_updates":             "RAW.TRIP_UPDATES",
+    "vehicle_positions":        "RAW.VEHICLE_POSITIONS",
+    "alerts":                   "RAW.ALERTS",
+    "quarantine_trip_updates":  "RAW.QUARANTINE_TRIP_UPDATES",
+    "quarantine_vehicle_positions": "RAW.QUARANTINE_VEHICLE_POSITIONS",
+    "quarantine_alerts":        "RAW.QUARANTINE_ALERTS",
 }
 
 
@@ -100,7 +158,7 @@ def copy_from_s3(
     s3_prefix: str,
     cfg: Config,
 ) -> int:
-    """Run COPY INTO for the given topic and S3 prefix (e.g. trip_updates/dt=2026-04-27)."""
+    """Run COPY INTO for the given topic and S3 prefix."""
     table = _TABLE_NAMES[topic]
     sql = _COPY_SQL.format(table=table, stage=cfg.snowflake_stage, s3_prefix=s3_prefix)
     cur = conn.cursor()

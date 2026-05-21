@@ -15,6 +15,7 @@ import boto3
 from src.load.snowflake_loader import copy_from_s3, ensure_tables, get_connection
 
 TOPICS = ["trip_updates", "vehicle_positions", "alerts"]
+QUARANTINE_TOPICS = ["quarantine_trip_updates", "quarantine_vehicle_positions", "quarantine_alerts"]
 
 
 @dataclass
@@ -61,6 +62,15 @@ def main() -> None:
             else:
                 print(f"Loaded {rows} rows from {s3_check_prefix}")
                 any_loaded = True
+
+        # quarantine topics — load if present, never fail job if absent
+        for topic in QUARANTINE_TOPICS:
+            s3_check_prefix = f"raw/{topic}/dt={ds}/"
+            stage_prefix = f"{topic}/dt={ds}/"
+            if not partition_exists(bucket, s3_check_prefix):
+                continue
+            rows = copy_from_s3(conn, topic, stage_prefix, cfg)
+            print(f"Quarantine {topic}: loaded {rows} rows from {s3_check_prefix}")
 
         if not any_loaded:
             print("No data loaded for any topic — check S3 and Spark job.")

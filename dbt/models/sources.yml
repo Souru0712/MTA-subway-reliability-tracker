@@ -1,0 +1,37 @@
+version: 2
+
+sources:
+  - name: raw
+    database: "{{ env_var('SNOWFLAKE_DATABASE', 'MTA') }}"
+    schema: RAW
+    tables:
+      - name: trip_updates
+      - name: vehicle_positions
+      - name: alerts
+      - name: stop_times_flat
+
+models:
+  - name: stg_trip_updates
+    description: >
+      Typed, bounds-filtered trip updates. Delay source of truth is the MTA
+      feed's delay_seconds. Adds consistent time dimensions (day_type,
+      time_period) so every mart slices identically.
+    columns:
+      - name: delay_seconds
+        description: MTA-calculated seconds behind schedule. Negative = early. Bounds [-3600, 7200].
+
+  - name: stg_alerts
+    description: >
+      Deduped alerts with a resolved active window [active_start_ts, active_end_ts].
+      Window comes from active_period_start/end, NOT poll time.
+
+  - name: mart_line_reliability
+    description: >
+      The baseline spine. Reliability by week x route x day_type x time_period.
+      Percentiles are primary; on_time_pct is derived with a named 60s threshold.
+
+  - name: mart_alert_delay_correlation
+    description: >
+      Headline mart. Delay during each alert's real active window vs the line's
+      baseline, plus lead time (minutes delays rose before activation). Describes
+      timing only; makes no causal claim.
