@@ -4,6 +4,48 @@ Streaming pipeline that ingests live MTA GTFS-RT feeds, archives every raw event
 
 ---
 
+## What This Project Demonstrates
+
+The pipeline is the foundation; the engineering that matters is in **trusting the
+numbers it produces.** Building this surfaced a series of data-quality problems that
+each had to be diagnosed and validated before any reliability statistic could be
+believed:
+
+- **The feed doesn't report what it appears to.** MTA's `delay_seconds` field is
+  populated for exactly one line (the L) out of 30 — every other route reports
+  zero across tens of millions of rows. Rather than ship "100% on-time" for 29
+  lines, delay is **computed independently** from the static schedule join.
+
+- **The computation is validated against ground truth.** The L is the only line
+  with both a feed delay and a computable one, so it's the validation harness:
+  the schedule-derived delay matches MTA's to a **15-second median (90% within
+  30 seconds)**. The validated method is then applied system-wide, with the
+  extrapolation stated explicitly rather than assumed.
+
+- **Three defects found and corrected through that validation:**
+  a **~134× prediction-history inflation** (the raw feed keeps every poll's
+  prediction; deduplicated to the final pre-arrival prediction via a window
+  function in dbt staging); a **4-hour UTC/EDT timezone offset** (diagnosed from
+  the error being exactly 14,400 seconds; fixed with DST-aware conversion); and a
+  **GTFS past-midnight (`hour ≥ 24`) anchoring bias** on overnight service.
+
+- **Residual artifacts are documented, not hidden.** A small after-midnight skew on
+  trunk IRT lines and consistent schedule padding on shuttle lines are
+  characterized in [`KNOWN_CHARACTERISTICS.md`](./KNOWN_CHARACTERISTICS.md) rather
+  than masked — including the limitation that cross-line comparison rests on a
+  method validated only where ground truth exists.
+
+**The analytical layer** is a layered dbt project (staging → marts) on Snowflake:
+a deduplicated, delay-computed, timezone- and midnight-corrected base feeding a
+cross-line reliability mart (on-time rates and delay percentiles by route ×
+time-of-day × day-type) and an alert-correlation mart (in progress, pending alert
+data accumulation).
+
+> **Stack:** Kafka (Redpanda) · Spark Structured Streaming · S3 · Snowflake · dbt ·
+> GitHub Actions · Docker. **Engineering themes:** stateless streaming ingestion with
+> idempotent loading, validation against ground truth, and disciplined data-quality
+> handling.
+
 ## The Problem
 
 MTA publishes live feeds every 30 seconds but no historical per-station reliability data exists. There is no equivalent of flight-delay statistics for the subway.
