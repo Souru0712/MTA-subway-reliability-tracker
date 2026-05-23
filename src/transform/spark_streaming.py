@@ -50,7 +50,13 @@ def build_spark(cfg: Config) -> SparkSession:
         .config("spark.hadoop.fs.s3a.secret.key", cfg.aws_secret_access_key)
         .config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com")
         .config("spark.hadoop.fs.s3a.fast.upload", "true")
+        .config("spark.hadoop.fs.s3a.connection.maximum", "100")
+        .config("spark.hadoop.fs.s3a.threads.max", "20")
+        .config("spark.hadoop.fs.s3a.multipart.size", "67108864")   # 64MB parts
         .config("spark.sql.parquet.compression.codec", "snappy")
+        # S3 has no atomic rename — algorithm v2 writes directly to final path,
+        # avoiding the _temporary staging dir that causes FileNotFoundException
+        .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
         .getOrCreate()
     )
 
@@ -118,10 +124,12 @@ def make_s3_writer(
         if batch_df.isEmpty():
             return
 
-        # single classification pass — cache so valid + rejected filters don't re-scan
+        # single classification pass — batch_df is already materialised in memory,
+        # no cache needed; two filter passes over a few-thousand-row in-memory batch
+        # are cheaper than the cache/unpersist round-trip
         classified = classify_fn(
             batch_df.withColumn("ingested_at", F.current_timestamp())
-        ).cache()
+        )
 
         valid_df = (
             classified
@@ -130,20 +138,11 @@ def make_s3_writer(
         )
         rejected_df = classified.filter(F.col("rejection_reason").isNotNull())
 
-        # coalesce(1): one file per topic per trigger — kills small-file problem at source
-        # safe at 2-min trigger cadence where batch size fits in a single writer task
+        # two write actions only — no count() calls eliminates 2 Spark jobs per batch
         valid_df.coalesce(1).write.format("parquet").mode("append").partitionBy("dt").save(s3_path)
         rejected_df.coalesce(1).write.format("parquet").mode("append").partitionBy("dt").save(quarantine_path)
 
-        # counts hit warm cache
-        rejected_count = rejected_df.count()
-        total_count = classified.count()
-        classified.unpersist()
-
-        logger.info(
-            "%s batch_id=%d total=%d valid=%d rejected=%d",
-            label, batch_id, total_count, total_count - rejected_count, rejected_count,
-        )
+        logger.info("%s batch_id=%d written", label, batch_id)
 
     return write_batch
 
