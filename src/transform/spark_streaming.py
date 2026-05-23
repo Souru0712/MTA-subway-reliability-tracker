@@ -66,7 +66,11 @@ def read_kafka_stream(spark: SparkSession, bootstrap: str, topic: str):
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", bootstrap)
         .option("subscribe", topic)
-        .option("startingOffsets", "earliest")
+        # latest: only applies on first run (no checkpoint). Once a checkpoint
+        # exists Spark ignores this and resumes from the committed offset.
+        # Avoids the startup race where Kafka purges records between consumer
+        # registration and first fetch.
+        .option("startingOffsets", "latest")
         .option("failOnDataLoss", "false")
         # 50k: ~10-20x steady-state (~2.4-4.8k/batch); drain speed comes from batch
         # repetition not batch size — full-day backlog clears in minutes over back-to-back batches
