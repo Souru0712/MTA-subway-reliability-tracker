@@ -85,6 +85,10 @@ services:
       - .env
     environment:
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # JAVA_TOOL_OPTIONS is picked up by every JVM at startup (before any app code).
+      # This is the only reliable way to pass JVM flags in local[*] mode — spark.driver.extraJavaOptions
+      # is a no-op there because the driver IS the spark-submit JVM, already running.
+      JAVA_TOOL_OPTIONS: "-Dcom.amazonaws.sdk.disableCertChecking=true"
     deploy:
       resources:
         limits:
@@ -109,6 +113,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       SPARK_WORKER_MEMORY: 6g   # matches spark.driver.memory — worker can accept full-size executors
       SPARK_WORKER_CORES: "4"   # 4 cores handles 16 partitions in 4 parallel waves
+      JAVA_TOOL_OPTIONS: "-Dcom.amazonaws.sdk.disableCertChecking=true"
     deploy:
       resources:
         limits:

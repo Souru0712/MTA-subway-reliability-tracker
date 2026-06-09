@@ -3,8 +3,24 @@ FROM apache/spark:3.5.0
 USER root
 
 ENV PIP_TRUSTED_HOST="pypi.org pypi.python.org files.pythonhosted.org"
+# JAVA_TOOL_OPTIONS is applied by the JVM before any application code runs.
+# This disables cert checking in the AWS SDK's bundled Apache HttpClient so
+# S3A writes succeed when a network proxy intercepts HTTPS with its own cert.
+ENV JAVA_TOOL_OPTIONS="-Dcom.amazonaws.sdk.disableCertChecking=true"
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*
+
+# Import the system CA bundle into the JVM truststore so the AWS SDK (Java)
+# can verify S3 SSL certs through the network proxy
+RUN update-ca-certificates && \
+    find / -name "cacerts" -path "*/jre/*" -o -name "cacerts" -path "*/jdk*" 2>/dev/null | head -1 | \
+    xargs -I{} keytool -importcert \
+      -noprompt \
+      -trustcacerts \
+      -alias system-ca-bundle \
+      -file /etc/ssl/certs/ca-certificates.crt \
+      -keystore {} \
+      -storepass changeit || true
 
 RUN pip install --no-cache-dir \
     psycopg2-binary==2.9.9 \

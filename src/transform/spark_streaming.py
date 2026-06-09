@@ -57,6 +57,9 @@ def build_spark(cfg: Config) -> SparkSession:
         # S3 has no atomic rename — algorithm v2 writes directly to final path,
         # avoiding the _temporary staging dir that causes FileNotFoundException
         .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
+        # SSL cert checking is disabled via JAVA_TOOL_OPTIONS in docker-compose — that env var
+        # is the only reliable hook in local[*] mode because spark.driver.extraJavaOptions is
+        # a no-op when the driver IS the spark-submit JVM (already started, can't add JVM args).
         .getOrCreate()
     )
 
@@ -70,7 +73,7 @@ def read_kafka_stream(spark: SparkSession, bootstrap: str, topic: str):
         # exists Spark ignores this and resumes from the committed offset.
         # Avoids the startup race where Kafka purges records between consumer
         # registration and first fetch.
-        .option("startingOffsets", "latest")
+        .option("startingOffsets", "earliest")
         .option("failOnDataLoss", "false")
         # 50k: ~10-20x steady-state (~2.4-4.8k/batch); drain speed comes from batch
         # repetition not batch size — full-day backlog clears in minutes over back-to-back batches
