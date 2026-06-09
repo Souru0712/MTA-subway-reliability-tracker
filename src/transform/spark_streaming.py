@@ -37,13 +37,13 @@ _DELAY_MAX_SECONDS = 7200    # 2 hours late
 def build_spark(cfg: Config) -> SparkSession:
     return (
         SparkSession.builder.appName("mta-reliability-streaming")
-        # local[4]: gives catch-up batches write parallelism; writer is I/O-bound not CPU-bound
-        .master("local[4]")
-        # 4g headroom on 16GB — not a throughput gain; job is I/O-bound, never memory-bound
-        .config("spark.driver.memory", "4g")
+        # local[*]: uses all available cores. more threads = more parallelism.
+        .master("local[*]")
+        # 2g extra for breathing room to manage extra concurrent task metadata without hitting sudden JVM Garbage Collection Pauses
+        .config("spark.driver.memory", "6g")
         # no groupBy => no shuffle, but cap partition count if one ever appears
-        .config("spark.sql.shuffle.partitions", "4")
-        .config("spark.default.parallelism", "4")
+        .config("spark.sql.shuffle.partitions", "16")
+        .config("spark.default.parallelism", "16")
         # free insurance: coalesces post-shuffle partitions automatically
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.hadoop.fs.s3a.access.key", cfg.aws_access_key_id)
@@ -51,7 +51,7 @@ def build_spark(cfg: Config) -> SparkSession:
         .config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com")
         .config("spark.hadoop.fs.s3a.fast.upload", "true")
         .config("spark.hadoop.fs.s3a.connection.maximum", "100")
-        .config("spark.hadoop.fs.s3a.threads.max", "20")
+        .config("spark.hadoop.fs.s3a.threads.max", "16")
         .config("spark.hadoop.fs.s3a.multipart.size", "67108864")   # 64MB parts
         .config("spark.sql.parquet.compression.codec", "snappy")
         # S3 has no atomic rename — algorithm v2 writes directly to final path,

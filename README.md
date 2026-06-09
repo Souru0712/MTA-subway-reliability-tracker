@@ -643,9 +643,8 @@ Fill in all sections using the same variable descriptions from Approach 1 above.
 docker compose build
 doocker compose up -d
 
-# Create Kafka topics
-docker exec -it redpanda rpk topic create \
-  mta.trip_updates mta.vehicle_positions mta.alerts
+docker exec -it redpanda rpk topic add-partitions mta.trip_updates mta.vehicle_positions mta.alerts --num 15
+
 
 # Set retention per topic — allocated by actual data volume (10GB total, 7 days each)
 # trip_updates produces ~95% of all data, so it gets the largest allocation
@@ -707,8 +706,35 @@ aws s3 ls s3://your-bucket-name/raw/trip_updates/ --recursive | head -10
 ---
 
 ### Step 6: GitHub Actions — daily S3 → Snowflake load
+GitHub Actions runs the daily compaction in GitHub's cloud — no containers, no VM, free for public repos.
 
-Follow the same GitHub Actions setup from Approach 1 — Step 13.
+**One-time setup — add repository secrets:**
+
+Go to your GitHub repo → **Settings → Secrets and variables → Actions → New repository secret** for each:
+
+| Secret name | Value |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | your AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | your AWS secret key |
+| `SNOWFLAKE_ACCOUNT` | your Snowflake account identifier |
+| `SNOWFLAKE_USER` | `mta_svc` |
+| `SNOWFLAKE_PASSWORD` | your Snowflake password |
+| `S3_BUCKET` | your S3 bucket name |
+
+The workflow `.github/workflows/daily_snowflake_load.yml` runs automatically at 3 AM UTC daily.
+
+**Backfill missed days** — trigger manually from the GitHub UI:
+
+1. GitHub repo → **Actions** tab
+2. Left sidebar → **Daily S3 → Snowflake Load**
+3. **Run workflow** → enter date (e.g. `2026-05-13`) → **Run workflow**
+
+Or via CLI:
+```bash
+gh workflow run daily_snowflake_load.yml -f ds=2026-05-13
+```
+
+`COPY INTO` is idempotent — re-running the same date is safe.
 
 ---
 

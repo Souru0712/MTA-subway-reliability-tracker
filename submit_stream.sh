@@ -17,21 +17,21 @@ spark-submit \
   `# --- Master: local[4], NOT local[*]. Leave cores for the OS + Kafka client.` \
   `# A stateless writer is I/O-bound; 4 threads give catch-up batches some write` \
   `# parallelism without the contention local[*] causes on a shared desktop.` \
-  --master "local[4]" \
+  --master "local[*]" \
   \
   `# --- Driver memory: in local mode the driver IS the executor.` \
   `# 4g on a 16GB box is comfortable HEADROOM, not a throughput gain -- a stateless` \
   `# job processing a few hundred rows/batch is I/O-bound and never memory-bound.` \
   `# Larger heaps (6-8g) would sit idle; 4g covers catch-up batches + S3 buffers.` \
-  --driver-memory 4g \
+  --driver-memory 6g \
   \
   `# --- Shuffle partitions: default is 200. We have no shuffle (stateless), but` \
   `# if any incidental shuffle appears, 200 tasks over a few thousand rows is pure` \
   `# scheduling overhead. Match to local thread count (4).` \
-  --conf spark.sql.shuffle.partitions=4 \
+  --conf spark.sql.shuffle.partitions=16 \
   \
   `# --- Default parallelism likewise matched to the 4 local threads.` \
-  --conf spark.default.parallelism=4 \
+  --conf spark.default.parallelism=16 \
   \
   `# --- Adaptive Query Execution on: lets Spark coalesce post-shuffle partitions` \
   `# automatically if a shuffle ever does occur. Cheap insurance.` \
