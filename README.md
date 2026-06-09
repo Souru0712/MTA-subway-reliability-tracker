@@ -23,7 +23,7 @@ believed:
   extrapolation stated explicitly rather than assumed.
 
 - **Three defects found and corrected through that validation:**
-  a **~134× prediction-history inflation** (the raw feed keeps every poll's
+  a **~176× prediction-history inflation** (the raw feed keeps every poll's
   prediction; deduplicated to the final pre-arrival prediction via a window
   function in dbt staging); a **4-hour UTC/EDT timezone offset** (diagnosed from
   the error being exactly 14,400 seconds; fixed with DST-aware conversion); and a
@@ -617,7 +617,7 @@ Run every container on one machine. Requires 8GB+ RAM and the machine must stay 
 python -m venv .venv
 
 # Mac / Linux
-source .venv/bin/activate
+source .venv/Scripts/activate
 
 # Windows
 .venv\Scripts\activate

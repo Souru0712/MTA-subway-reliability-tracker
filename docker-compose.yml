@@ -58,6 +58,8 @@ services:
       - ./config:/opt/spark/work/config
     env_file:
       - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
 
   spark-worker:
     build:
@@ -68,6 +70,7 @@ services:
     environment:
       SPARK_WORKER_MEMORY: 1g
       SPARK_WORKER_CORES: "1"
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     depends_on:
       - spark-master
     volumes:
