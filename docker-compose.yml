@@ -16,9 +16,11 @@ services:
       - --mode dev-container
       - --smp 1
       - --default-log-level=warn
-      - --memory 536870912
+      - --memory 1073741824
       - --reserve-memory 0
       - --set redpanda.default_topic_partitions=16
+      - --set redpanda.disable_metrics=true
+      - --set redpanda.disable_public_metrics=true
     ports:
       - "9092:9092"   # Kafka API
       - "9644:9644"     # Redpanda admin API
@@ -83,6 +85,12 @@ services:
       - .env
     environment:
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    deploy:
+      resources:
+        limits:
+          memory: 8g        # headroom above spark.driver.memory=6g + JVM overhead
+        reservations:
+          memory: 6g
 
   spark-worker:
     build:
@@ -90,10 +98,6 @@ services:
       dockerfile: infra/docker/Dockerfile.spark
     container_name: spark-worker
     entrypoint: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
-    environment:
-      SPARK_WORKER_MEMORY: 1g
-      SPARK_WORKER_CORES: "1"
-      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     depends_on:
       - spark-master
     volumes:
@@ -101,6 +105,16 @@ services:
       - ./config:/opt/spark/work/config
     env_file:
       - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      SPARK_WORKER_MEMORY: 6g   # matches spark.driver.memory — worker can accept full-size executors
+      SPARK_WORKER_CORES: "4"   # 4 cores handles 16 partitions in 4 parallel waves
+    deploy:
+      resources:
+        limits:
+          memory: 7g
+        reservations:
+          memory: 6g
 
   # ── GTFS Producer ───────────────────────────────────────────────────────────
   gtfs-producer:

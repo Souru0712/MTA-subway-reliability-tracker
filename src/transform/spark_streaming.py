@@ -167,7 +167,7 @@ def run(cfg: Config) -> None:
             "trip_updates",
             _classify_trip_updates,
         ))
-        .option("checkpointLocation", cfg.spark_checkpoint_base + "/cold/trip_updates")
+        .option("checkpointLocation", "/tmp/checkpoints/trip_updates")
         # 2-min trigger: bundles 4-8 polls per write, cuts file count ~5x with zero analytical loss
         .trigger(processingTime="2 minutes")
         .outputMode("append")
@@ -186,7 +186,7 @@ def run(cfg: Config) -> None:
             "vehicle_positions",
             _classify_default,
         ))
-        .option("checkpointLocation", cfg.spark_checkpoint_base + "/cold/vehicle_positions")
+        .option("checkpointLocation", "/tmp/checkpoints/vehicle_positions")
         # 2-min trigger: bundles 4-8 polls per write, cuts file count ~5x with zero analytical loss
         .trigger(processingTime="2 minutes")
         .outputMode("append")
@@ -205,7 +205,7 @@ def run(cfg: Config) -> None:
             "alerts",
             _classify_default,
         ))
-        .option("checkpointLocation", cfg.spark_checkpoint_base + "/cold/alerts")
+        .option("checkpointLocation", "/tmp/checkpoints/alerts")
         # 2-min trigger: bundles 4-8 polls per write, cuts file count ~5x with zero analytical loss
         .trigger(processingTime="2 minutes")
         .outputMode("append")
