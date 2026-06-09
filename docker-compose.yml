@@ -18,6 +18,7 @@ services:
       - --default-log-level=warn
       - --memory 536870912
       - --reserve-memory 0
+      - --set redpanda.default_topic_partitions=16
     ports:
       - "9092:9092"   # Kafka API
       - "9644:9644"     # Redpanda admin API
@@ -30,7 +31,7 @@ services:
       retries: 5
 
   redpanda-console:
-    image: redpandadata/console:v2.4.5
+    image: redpandadata/console:v2.7.2
     container_name: redpanda-console
     ports:
       - "8082:8080"
@@ -41,6 +42,28 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
+
+  # ── Topic Init ──────────────────────────────────────────────────────────────
+  redpanda-init:
+    image: redpandadata/redpanda:v24.1.1
+    container_name: redpanda-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        rpk topic create mta.trip_updates      --partitions 16 --brokers redpanda:9092 || true
+        rpk topic create mta.vehicle_positions --partitions 16 --brokers redpanda:9092 || true
+        rpk topic create mta.alerts            --partitions 16 --brokers redpanda:9092 || true
+
+        rpk topic alter-config mta.trip_updates      --set retention.bytes=8589934592  --set retention.ms=604800000 --brokers redpanda:9092
+        rpk topic alter-config mta.vehicle_positions --set retention.bytes=1610612736  --set retention.ms=604800000 --brokers redpanda:9092
+        rpk topic alter-config mta.alerts            --set retention.bytes=536870912   --set retention.ms=604800000 --brokers redpanda:9092
+
+        echo "Topics ready:"
+        rpk topic list --brokers redpanda:9092
+    restart: "no"
 
   # ── Spark ───────────────────────────────────────────────────────────────────
   spark-master:
@@ -92,6 +115,8 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
     restart: on-failure
 
 volumes:

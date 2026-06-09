@@ -643,8 +643,7 @@ Fill in all sections using the same variable descriptions from Approach 1 above.
 docker compose build
 doocker compose up -d
 
-docker exec -it redpanda rpk topic add-partitions mta.trip_updates mta.vehicle_positions mta.alerts --num 15
-
+# 16 Partitions on default to match 16 tasks for Spark
 
 # Set retention per topic — allocated by actual data volume (10GB total, 7 days each)
 # trip_updates produces ~95% of all data, so it gets the largest allocation
