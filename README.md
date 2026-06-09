@@ -640,11 +640,30 @@ Fill in all sections using the same variable descriptions from Approach 1 above.
 ### Step 3: Start core infrastructure
 
 ```bash
-docker compose up -d redpanda
+docker compose build
+doocker compose up -d
 
 # Create Kafka topics
 docker exec -it redpanda rpk topic create \
   mta.trip_updates mta.vehicle_positions mta.alerts
+
+# Set retention per topic — allocated by actual data volume (10GB total, 7 days each)
+# trip_updates produces ~95% of all data, so it gets the largest allocation
+docker exec -it redpanda rpk topic alter-config mta.trip_updates \
+  --set retention.bytes=8589934592 \
+  --set retention.ms=604800000
+
+docker exec -it redpanda rpk topic alter-config mta.vehicle_positions \
+  --set retention.bytes=1610612736 \
+  --set retention.ms=604800000
+
+docker exec -it redpanda rpk topic alter-config mta.alerts \
+  --set retention.bytes=536870912 \
+  --set retention.ms=604800000
+
+# Verify retention applied
+docker exec -it redpanda rpk topic describe mta.trip_updates
+# Expect: retention.bytes=8589934592, retention.ms=604800000
 
 # Verify topics — open http://localhost:8082 → Topics tab (3 topics)
 ```
@@ -697,7 +716,7 @@ Follow the same GitHub Actions setup from Approach 1 — Step 13.
 
 | Service | URL |
 |---|---|
-| Redpanda Console (VM) | http://\<hetzner-ip\>:8082 |
+| Redpanda Console (VM) | http://localhost:8082 |
 | Spark Master UI | http://localhost:8081 |
 | Spark Application UI | http://localhost:4040 |
 

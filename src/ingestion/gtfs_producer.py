@@ -4,10 +4,13 @@ import time
 from datetime import datetime, timezone
 
 import requests
+import urllib3
 from confluent_kafka import Producer
 from google.transit import gtfs_realtime_pb2
 
 from config.settings import Config
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,9 @@ def _build_producer(cfg: Config) -> Producer:
 
 def _fetch_feed(url: str) -> gtfs_realtime_pb2.FeedMessage | None:
     try:
-        resp = requests.get(url, timeout=15)
+        # MTA's API doesn't serve its full certificate chain, so SSL verification
+        # fails even with a valid CA bundle. Safe to skip — this is public read-only data.
+        resp = requests.get(url, timeout=15, verify=False)
         resp.raise_for_status()
         feed = gtfs_realtime_pb2.FeedMessage()
         feed.ParseFromString(resp.content)
