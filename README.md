@@ -1,3 +1,7 @@
+<a href="https://www.youtube.com/watch?v=uCKDGxDRbjI&feature=youtu.be" target="_blank">
+  <img src="https://img.youtube.com/vi/uCKDGxDRbjI/maxresdefault.jpg" alt="Watch the video" width="1000" />
+</a>
+
 # MTA Subway Reliability Tracker
 
 Streaming pipeline that ingests live MTA GTFS-RT feeds, archives every raw event to S3 Parquet, and loads them into Snowflake for historical reliability analysis — giving journalists and commuters flight-delay-style stats for the NYC subway.
