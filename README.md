@@ -1,6 +1,10 @@
-<a href="https://www.youtube.com/watch?v=uCKDGxDRbjI&feature=youtu.be" target="_blank">
-  <img src="https://img.youtube.com/vi/uCKDGxDRbjI/maxresdefault.jpg" alt="Watch the video" width="1000" />
-</a>
+# Video Demo
+<div align="center">
+  <a href="https://www.youtube.com/watch?v=uCKDGxDRbjI" target="_blank">
+    <img src="https://img.youtube.com/vi/uCKDGxDRbjI/maxresdefault.jpg" alt="Watch the video" width="600" />
+  </a>
+  <p><em>Click to watch!</em></p>
+</div>
 
 # MTA Subway Reliability Tracker
 
