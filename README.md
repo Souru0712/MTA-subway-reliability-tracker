@@ -3,7 +3,7 @@
   <a href="https://www.youtube.com/watch?v=uCKDGxDRbjI" target="_blank">
     <img src="https://img.youtube.com/vi/uCKDGxDRbjI/maxresdefault.jpg" alt="Watch the video" width="600" />
   </a>
-  <p><em>Click to watch!</em></p>
+  <p><em>SparkSession Configuration</em></p>
 </div>
 
 # MTA Subway Reliability Tracker
