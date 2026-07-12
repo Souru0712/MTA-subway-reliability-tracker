@@ -21,9 +21,9 @@ trips within 30 seconds. This validates the *method*; it is then applied to all
 lines, whose inputs (predicted arrival, schedule) are identical in kind. The
 extrapolation is stated, not assumed: only the L has ground truth.
 
-## 3. ~134 predictions per arrival (prediction history)
-`RAW.TRIP_UPDATES` retains every poll's prediction, ~134 per train-arrival. Raw
-aggregates were therefore inflated ~134× and biased toward trains that linger in
+## 3. ~176 predictions per arrival (prediction history)
+`RAW.TRIP_UPDATES` retains every poll's prediction, ~176 per train-arrival. Raw
+aggregates were therefore inflated ~176× and biased toward trains that linger in
 the prediction window. **Decision:** the staging layer deduplicates to one row per
 (trip, stop, NY service date) — the final prediction before arrival. Counts in the
 marts are real arrivals, not predictions.

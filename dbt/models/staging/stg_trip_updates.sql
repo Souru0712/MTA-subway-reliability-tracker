@@ -4,8 +4,8 @@
 -- THREE corrections established by validation, all applied here at the base so
 -- every downstream mart inherits them:
 --
---  1. DEDUP TO FINAL PREDICTION. RAW.TRIP_UPDATES holds ~134 predictions per
---     train-arrival (full prediction history). Raw aggregates were inflated ~134x
+--  1. DEDUP TO FINAL PREDICTION. RAW.TRIP_UPDATES holds ~176 predictions per
+--     train-arrival (full prediction history). Raw aggregates were inflated ~176x
 --     and biased toward trains lingering in the prediction window. We keep one row
 --     per (trip, stop, NY service date): the latest event_time = the prediction
 --     closest to actual arrival.
